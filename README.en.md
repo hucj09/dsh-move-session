@@ -7,7 +7,7 @@ session operations: copy the current session **as-is** into another workspace (f
 log, title, agent preset and model selection preserved), with a choice to **keep the original** or
 **archive the original**. Only **idle** sessions can be moved.
 
-> Current version **v0.1.2**. Same hot-pluggable convention as `dsh-ssh` / `dsh-task-board`:
+> Current version **v0.1.3**. Same hot-pluggable convention as `dsh-ssh` / `dsh-task-board`:
 > mounted via `cordis.patch.yml` + a profile `node_modules` install, **no dsh source changes**.
 > Zero-dependency plain JavaScript, **source-as-artifact** (`lib/` is the runtime code), no build step.
 

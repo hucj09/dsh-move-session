@@ -1,7 +1,7 @@
 {
   "name": "@hucj/dsh-move-session",
   "description": "Cross-workspace session migration for the dsh web GUI: a Move Session header action plus dialog (target workspace picker, keep-or-archive the original), idle-session only, full context preserved. Hot-pluggable — mounted via ~/.dsh/cordis.patch.yml + a profile node_modules symlink, no dsh source changes.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

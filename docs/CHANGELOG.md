@@ -7,7 +7,16 @@
 
 ---
 
-## v0.1.2（2026-08-16 · 待发布）
+## v0.1.3（2026-08-16 · 待发布）
+
+重新发布（无功能改动）：
+
+- **许可证改为 MIT**：`LICENSE` 全文、`package.json.license`、双语 README 同步（此前为 BSD-3-Clause）
+- **发布物清理**：README 安装示例不再出现本地路径（`link:/path/to/dsh-move-session` 占位符）；
+  Playwright 测试脚本 React UMD 路径改 `~` 动态解析（消除 `C:\Users\hu` 硬编码）
+- 因 v0.1.2 tarball 快照仍含旧 README/许可信息，故递增版本重新发布
+
+## v0.1.2（2026-08-16 · 已发布）
 
 修复「打开迁移后的会话」按钮失效（keep 模式成功面板）：
 

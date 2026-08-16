@@ -102,6 +102,18 @@ function makeCtx(overrides = {}) {
           },
         }
       }
+      if (name === 'fs') {
+        return {
+          resolve: async (path) => {
+            if (overrides.targetDirResolveError) throw new Error('ENOENT: no such file or directory')
+            return { path }
+          },
+          stat: async () => {
+            if (overrides.targetDirMissing) return undefined
+            return { type: overrides.targetDirType || 'directory', version: 'v1' }
+          },
+        }
+      }
       return undefined
     },
   }
@@ -198,6 +210,52 @@ test('flushes a live source session before reading', async () => {
 test('rejects an unknown target workspace', async () => {
   const ctx = makeCtx({ workspaces: [{ id: 'w1', path: 'C:/ws1', title: 'WS1', sessionIds: ['src-1'] }] })
   await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w9', mode: 'keep' }), (e) => e.code === 'target-not-found')
+})
+
+test('rejects a stale target workspace whose directory is gone — before any write', async () => {
+  const ctx = makeCtx({ targetDirMissing: true })
+  await assert.rejects(
+    () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
+    (e) => e.code === 'target-missing-dir',
+  )
+  // the copy must NOT be created: no orphan sessions
+  assert.equal(ctx.calls.created.length, 0)
+  assert.deepEqual(ctx.calls.attached, [])
+  assert.deepEqual(ctx.calls.archived, [])
+})
+
+test('rejects when the target directory cannot be resolved', async () => {
+  const ctx = makeCtx({ targetDirResolveError: true })
+  await assert.rejects(
+    () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
+    (e) => e.code === 'target-missing-dir',
+  )
+  assert.equal(ctx.calls.created.length, 0)
+})
+
+test('rejects a target path that is not a directory', async () => {
+  const ctx = makeCtx({ targetDirType: 'file' })
+  await assert.rejects(
+    () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
+    (e) => e.code === 'target-missing-dir',
+  )
+  assert.equal(ctx.calls.created.length, 0)
+})
+
+test('proceeds when the target directory exists (fs pre-check passes)', async () => {
+  const ctx = makeCtx()
+  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.created.length, 1)
+  assert.deepEqual(ctx.calls.attached, [result.sessionId])
+})
+
+test('skips the directory pre-check when no fs service is mounted', async () => {
+  const ctx = makeCtx()
+  const originalGet = ctx.get
+  ctx.get = (name) => (name === 'fs' ? undefined : originalGet(name))
+  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.created.length, 1)
+  assert.deepEqual(ctx.calls.attached, [result.sessionId])
 })
 
 test('rejects moving into the session\'s own workspace', async () => {

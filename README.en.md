@@ -7,7 +7,7 @@ session operations: copy the current session **as-is** into another workspace (f
 log, title, agent preset and model selection preserved), with a choice to **keep the original** or
 **archive the original**. Only **idle** sessions can be moved.
 
-> Current version **v0.1.0**. Same hot-pluggable convention as `dsh-ssh` / `dsh-task-board`:
+> Current version **v0.1.1**. Same hot-pluggable convention as `dsh-ssh` / `dsh-task-board`:
 > mounted via `cordis.patch.yml` + a profile `node_modules` symlink, **no dsh source changes**.
 > Zero-dependency plain JavaScript, **source-as-artifact** (`lib/` is the runtime code), no build step.
 
@@ -144,6 +144,7 @@ commits, code invariants); release history in **docs/CHANGELOG.md**.
 | `session-not-found` | session absent from session persistence |
 | `target-not-found` | target workspace does not exist |
 | `same-workspace` | session already belongs to the target workspace |
+| `target-missing-dir` | target workspace directory missing or stale (e.g. a temp directory cleaned up); **rejected before any write — no orphan copy** |
 | `preset-unavailable` | source agent preset cannot be resolved (no writes happen) |
 | `copy-failed` | copy creation failed (incl. unbalanced-log seed validation) |
 | `attach-failed` | copy created but workspace accounting failed (same semantics as the shipped fork) |

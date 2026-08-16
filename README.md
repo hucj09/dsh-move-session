@@ -6,7 +6,7 @@
 将当前会话**原封不动**地复制到另一个工作区（完整保留对话日志、标题、Agent 预设、模型选择），
 并支持**保留原会话**或**归档原会话**。仅支持**空闲会话**迁移。
 
-> 当前版本 **v0.1.0**。与 `dsh-ssh` / `dsh-task-board` 等插件同一套"热插拔"约定：
+> 当前版本 **v0.1.1**。与 `dsh-ssh` / `dsh-task-board` 等插件同一套"热插拔"约定：
 > `cordis.patch.yml` 挂载 + profile node_modules 符号链接，**不改任何 dsh 源码**。
 > 本包为零依赖纯 JavaScript，**源码即产物**（`lib/` 即运行时文件），无需构建。
 
@@ -135,6 +135,7 @@ npm run test:integrity # 真实迁移日志逐事件一致性校验（Python）
 | `session-not-found` | 会话不存在于 session persistence |
 | `target-not-found` | 目标工作区不存在 |
 | `same-workspace` | 会话已属于目标工作区 |
+| `target-missing-dir` | 目标工作区目录不存在或已失效（如临时目录被清理）；**在任何写入前拒绝，不产生孤儿副本** |
 | `preset-unavailable` | 源会话的 agent 预设无法解析（组合被拒，迁移不产生任何写入） |
 | `copy-failed` | 副本创建失败（含日志不平衡等 seed 校验失败） |
 | `attach-failed` | 副本已创建但工作区记账失败（与官方分叉的 attach 失败语义一致） |

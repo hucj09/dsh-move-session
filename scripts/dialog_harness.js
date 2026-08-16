@@ -13,7 +13,7 @@ var host = { call: async function () { return { ok: true, sessionId: 'new-1', ar
 var NS = 'move-session';
 var localeCtx = {
   subscribe: function () { return function () {}; },
-  bind: function () { return function (key) { return ({ 'dialog.cancel': '\u53d6\u6d88', 'dialog.confirm': '\u8fc1\u79fb', 'dialog.busy': '\u8fc1\u79fb\u4e2d\u2026', 'dialog.title': '\u8fc1\u79fb\u4f1a\u8bdd', 'dialog.note': 'note', 'dialog.target': '\u76ee\u6807\u5de5\u4f5c\u533a', 'dialog.original': '\u539f\u4f1a\u8bdd\u5904\u7406', 'dialog.archive': '\u5f52\u6863\u539f\u4f1a\u8bdd', 'dialog.archiveHint': 'hint-a', 'dialog.keep': '\u4fdd\u7559\u539f\u4f1a\u8bdd', 'dialog.keepHint': 'hint-k', 'dialog.empty': 'empty', 'dialog.success.title': 'ok', 'dialog.success.detail': 'd {workspace}', 'dialog.success.open': 'open', 'dialog.success.stay': 'stay', 'action.move': '\u8fc1\u79fb\u4f1a\u8bdd', 'hint.running': 'r', 'hint.noTarget': 'n', 'hint.default': 'm', 'dialog.error.openFailed': 'o: ', 'dialog.error.moveFailed': 'm: ' }[key] || key); }; },
+  bind: function () { return function (key) { return ({ 'dialog.cancel': '\u53d6\u6d88', 'dialog.confirm': '\u8fc1\u79fb', 'dialog.busy': '\u8fc1\u79fb\u4e2d\u2026', 'dialog.title': '\u8fc1\u79fb\u4f1a\u8bdd', 'dialog.currentSession': '\u5f53\u524d\u4f1a\u8bdd\uff1a', 'dialog.note': 'note', 'dialog.target': '\u76ee\u6807\u5de5\u4f5c\u533a', 'dialog.original': '\u539f\u4f1a\u8bdd\u5904\u7406', 'dialog.archive': '\u5f52\u6863\u539f\u4f1a\u8bdd', 'dialog.archiveHint': 'hint-a', 'dialog.keep': '\u4fdd\u7559\u539f\u4f1a\u8bdd', 'dialog.keepHint': 'hint-k', 'dialog.empty': 'empty', 'dialog.success.title': 'ok', 'dialog.success.detail': 'd {workspace}', 'dialog.success.open': 'open', 'dialog.success.stay': 'stay', 'action.move': '\u8fc1\u79fb\u4f1a\u8bdd', 'hint.running': 'r', 'hint.noTarget': 'n', 'hint.default': 'm', 'dialog.error.openFailed': 'o: ', 'dialog.error.moveFailed': 'm: ' }[key] || key); }; },
 };
 
 // ---- shared store (functional force updates only — see AGENTS.md rule 2) ----
@@ -65,7 +65,11 @@ function MoveSessionDialog(props) {
   var mode = modeState[0];
   var setMode = modeState[1];
   React.useEffect(function () {
-    if (dialog.open) { setTargetId(null); setMode('keep'); }
+    if (dialog.open) {
+      setTargetId(null);
+      setMode('keep');
+      if (typeof applyTheme === 'function') applyTheme();
+    }
   }, [dialog.open, dialog.sessionId]);
   if (!dialog.open) return null;
   var sessionId = dialog.sessionId;
@@ -90,6 +94,7 @@ function MoveSessionDialog(props) {
   return h('div', { className: 'dsh-ms-backdrop', onClick: close },
     h('div', { className: 'dsh-ms-card', onClick: function (event) { event.stopPropagation(); } },
       h('div', { className: 'dsh-ms-title' }, t('dialog.title')),
+      h('div', { className: 'dsh-ms-subtitle' }, t('dialog.currentSession') + 'T'),
       body));
 }
 

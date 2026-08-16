@@ -21,6 +21,7 @@ const REQUIRED_KEYS = [
   'hint.noTarget',
   'hint.default',
   'dialog.title',
+  'dialog.currentSession',
   'dialog.note',
   'dialog.target',
   'dialog.original',
@@ -98,6 +99,31 @@ test('row-menu injection anchors are present', () => {
   assert.match(CLIENT, /data-dsh-ms-menu-item/)
 })
 
+test('row-menu injection only targets session rows (not workspace rows)', () => {
+  // the click capture must track whether the clicked row is a session row
+  assert.match(CLIENT, /lastRowIsSession = false/)
+  assert.match(CLIENT, /lastRowIsSession = lastRowSessionId !== null/)
+  // the observer must gate injection on it
+  assert.match(CLIENT, /if \(lastRowIsSession && isSessionRowMenu\(menu\)\)/)
+  // workspace menus are excluded explicitly (they contain a rename entry too)
+  assert.match(CLIENT, /text\.indexOf\('删除工作区'\) !== -1 \|\| text\.indexOf\('Delete workspace'\) !== -1\) return false/)
+  // the ellipsis matcher covers both zh (…的操作) and en (…actions for …) rows
+  assert.match(CLIENT, /aria-label\$="\\u7684\\u64cd\\u4f5c"\]/)
+  assert.match(CLIENT, /aria-label\*="actions for "/)
+})
+
+test('row-menu injection disables the item for running sessions', () => {
+  // the fiber recovery must read the running flag
+  assert.match(CLIENT, /running: props\.node\.running === true/)
+  assert.match(CLIENT, /var lastRowRunning = false/)
+  assert.match(CLIENT, /lastRowRunning = info === null \? false : info\.running/)
+  // the injected item must be disabled with a localized hint
+  assert.match(CLIENT, /var disabled = lastRowRunning === true/)
+  assert.match(CLIENT, /button\.disabled = disabled/)
+  assert.match(CLIENT, /current\('hint\.running'\)/)
+  assert.match(CLIENT, /\.dsh-ms-menu-item:disabled\{opacity:\.45;cursor:not-allowed\}/)
+})
+
 test('header button uses the custom icon paths', () => {
   assert.match(CLIENT, /viewBox: '0 0 1024 1024'/)
   assert.match(CLIENT, /fill: 'currentColor'/)
@@ -106,4 +132,28 @@ test('header button uses the custom icon paths', () => {
 test('header button styles avoid theme-variable dependency (inherit + opacity)', () => {
   assert.match(CLIENT, /color:inherit;opacity:\.68/)
   assert.ok(!CLIENT.includes('var(--text-secondary'), 'must not depend on the undefined --text-secondary variable')
+})
+
+test('dialog palette follows the GUI theme (no hard-coded surface variables)', () => {
+  // theme machinery exists
+  assert.match(CLIENT, /var THEME_PALETTES = \{/)
+  assert.match(CLIENT, /function bodyIsDark\(\)/)
+  assert.match(CLIENT, /function applyTheme\(\)/)
+  assert.match(CLIENT, /function installThemeWatcher\(\)/)
+  // variables are published to :root and consumed by the modal CSS
+  assert.match(CLIENT, /setProperty\('--dsh-ms-bg', palette\.bg\)/)
+  assert.match(CLIENT, /background:var\(--dsh-ms-bg,#ffffff\)/)
+  assert.match(CLIENT, /color:var\(--dsh-ms-text,#1f2328\)/)
+  // the old hard-coded surface variables are gone from the modal CSS
+  assert.ok(!CLIENT.includes('var(--surface'), 'modal must not depend on --surface')
+  assert.ok(!CLIENT.includes('var(--text-primary'), 'modal must not depend on --text-primary')
+  // the watcher polls the body luminance on a throttled rAF loop (timers proved
+  // unreliable in headless Chromium) and is wired in apply
+  assert.match(CLIENT, /requestAnimationFrame\(tick\)/)
+  assert.match(CLIENT, /frame % 5 === 0/)
+  assert.match(CLIENT, /var lastDark = bodyIsDark\(\)/)
+  assert.match(CLIENT, /installThemeWatcher\(\)/)
+  assert.match(CLIENT, /'dsh-move-session: theme watcher'/)
+  // the dialog also re-applies the palette synchronously when it opens
+  assert.match(CLIENT, /if \(typeof applyTheme === 'function'\) applyTheme\(\)/)
 })

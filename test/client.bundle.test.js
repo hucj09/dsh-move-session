@@ -78,6 +78,21 @@ test('store force uses functional updates (regression: bare force() bailout)', (
   assert.equal(bare, null, 'bare force() call must not exist (React Object.is bailout)')
 })
 
+test('success panel "open moved session" reads the id before clearing state', () => {
+  // regression (v0.1.1 bug): onClick did setState({open:false, done:null,...})
+  // and only then read dialog.done.sessionId — dialog is a live reference to
+  // the module-level state object, so done was already null → TypeError → the
+  // moved session was never opened. The id must be captured BEFORE the setState.
+  const openIndex = CLIENT.indexOf("t('dialog.success.open')")
+  assert.ok(openIndex !== -1, 'success panel open button must exist')
+  const click = CLIENT.slice(openIndex - 600, openIndex)
+  assert.match(click, /var doneSessionId = dialog\.done\.sessionId/)
+  const readIdx = click.indexOf('dialog.done.sessionId')
+  const clearIdx = click.indexOf('setState({ open: false, done: null')
+  assert.ok(readIdx !== -1 && clearIdx !== -1 && readIdx < clearIdx,
+    'doneSessionId must be read before setState clears done')
+})
+
 test('dialog close is unconditional (no busy guard)', () => {
   assert.match(CLIENT, /function close\(\) \{\s*setState\(\{ open: false, busy: false, error: null, done: null \}\)/)
 })

@@ -9,7 +9,12 @@ var React = window.React;
 var h = React.createElement;
 
 // ---- stubs for dynamic-plugin builtins/services ----
-var host = { call: async function () { return { ok: true, sessionId: 'new-1', archived: true }; } };
+var host = {
+  call: async function (method, args) {
+    return { ok: true, sessionId: 'new-1', archived: args.mode !== 'keep' };
+  },
+};
+window.__openCalls = [];
 var NS = 'move-session';
 var localeCtx = {
   subscribe: function () { return function () {}; },
@@ -79,18 +84,48 @@ function MoveSessionDialog(props) {
     ? targetIdState[0] : targets.length > 0 ? targets[0].workspaceId : null;
   var canSubmit = !dialog.busy && !dialog.done && selectedTargetId !== null;
   function close() { setState({ open: false, busy: false, error: null, done: null }); }
+  function submit() {
+    if (!canSubmit) return;
+    setState({ busy: true, error: null });
+    host.call('moveSession', { sessionId: sessionId, targetWorkspaceId: selectedTargetId, mode: mode }).then(function (result) {
+      if (mode === 'archive') {
+        setState({ open: false, busy: false, error: null, done: null });
+        openSession(result.sessionId, function (error) {
+          setState({ open: true, busy: false, error: t('dialog.error.openFailed') + (error && error.message ? error.message : String(error)), done: null });
+        });
+      } else {
+        setState({ busy: false, error: null, done: { sessionId: result.sessionId } });
+      }
+    });
+  }
   var modeOption = function (value, label, hint) {
     return h('label', { className: 'dsh-ms-mode' + (mode === value ? ' sel' : '') },
       h('input', { type: 'radio', name: 'dsh-ms-mode', checked: mode === value, onChange: function () { setMode(value); } }),
       h('span', null, label));
   };
-  var body = h('div', { className: 'dsh-ms-form' },
-    h('div', { className: 'dsh-ms-options' },
-      modeOption('keep', t('dialog.keep'), t('dialog.keepHint')),
-      modeOption('archive', t('dialog.archive'), t('dialog.archiveHint'))),
-    h('div', { className: 'dsh-ms-footer' },
-      h('button', { type: 'button', className: 'dsh-ms-btn', onClick: close }, t('dialog.cancel')),
-      h('button', { type: 'button', className: 'dsh-ms-btn primary', onClick: function () {}, disabled: !canSubmit }, t('dialog.confirm'))));
+  var body;
+  if (dialog.done) {
+    body = h('div', { className: 'dsh-ms-success' },
+      h('div', { className: 'dsh-ms-success-title' }, t('dialog.success.title')),
+      h('div', { className: 'dsh-ms-footer' },
+        h('button', { type: 'button', className: 'dsh-ms-btn primary', onClick: function () {
+          // read the id BEFORE clearing the shared state (regression guard)
+          var doneSessionId = dialog.done.sessionId;
+          setState({ open: false, done: null, busy: false, error: null });
+          openSession(doneSessionId, function (error) {
+            setState({ open: true, busy: false, error: t('dialog.error.openFailed') + (error && error.message ? error.message : String(error)), done: null });
+          });
+        } }, t('dialog.success.open')),
+        h('button', { type: 'button', className: 'dsh-ms-btn', onClick: close }, t('dialog.success.stay'))));
+  } else {
+    body = h('div', { className: 'dsh-ms-form' },
+      h('div', { className: 'dsh-ms-options' },
+        modeOption('keep', t('dialog.keep'), t('dialog.keepHint')),
+        modeOption('archive', t('dialog.archive'), t('dialog.archiveHint'))),
+      h('div', { className: 'dsh-ms-footer' },
+        h('button', { type: 'button', className: 'dsh-ms-btn', onClick: close }, t('dialog.cancel')),
+        h('button', { type: 'button', className: 'dsh-ms-btn primary', onClick: submit, disabled: !canSubmit }, t('dialog.confirm'))));
+  }
   return h('div', { className: 'dsh-ms-backdrop', onClick: close },
     h('div', { className: 'dsh-ms-card', onClick: function (event) { event.stopPropagation(); } },
       h('div', { className: 'dsh-ms-title' }, t('dialog.title')),
@@ -105,7 +140,7 @@ var props = {
     { workspaceId: 'w1', title: 'WS1', path: 'C:/ws1', sessionIds: ['s1'] },
     { workspaceId: 'w2', title: 'WS2', path: 'C:/ws2', sessionIds: [] }] }); },
   useSessions: function (sel) { return sel({ byId: { s1: { title: 'T' } } }); },
-  openSession: function () {},
+  openSession: function (sessionId) { window.__openCalls.push(sessionId); },
 };
 
 var buttonHost = document.getElementById('button-host');

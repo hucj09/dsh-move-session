@@ -7,7 +7,22 @@
 
 ---
 
-## v0.1.1（2026-08-16 · 待发布）
+## v0.1.2（2026-08-16 · 待发布）
+
+修复「打开迁移后的会话」按钮失效（keep 模式成功面板）：
+
+- **根因**：成功面板「打开迁移后的会话」onClick 先 `setState({ open: false, done: null, ... })`
+  再读 `dialog.done.sessionId`——`dialog` 是模块级 state 对象的**同一引用**，此时 `done` 已被置
+  null，读取抛 TypeError，`openSession` 从未执行，视图停留在原会话；归档模式自动跳转读
+  `result.sessionId`（不经共享 state）故不受影响
+- **修复**：先 `var doneSessionId = dialog.done.sessionId` 缓存 id，再清空状态，最后
+  `openSession(doneSessionId, ...)`
+- **回归防护**：`test/client.bundle.test.js` 新增结构用例（断言 onClick 内 `done.sessionId`
+  读取必须先于 `setState({ open: false, done: null, ... })`，`node --test` 55 用例全绿）；
+  Playwright 新增 keep 模式成功面板端到端场景（提交 → 成功面板 → 点击打开 →
+  `window.__openCalls` 含新会话 id 且对话框关闭，且 keep 模式不会自动跳转）
+
+## v0.1.1（2026-08-16 · 未单独发布，并入 v0.1.2）
 
 发布前修复与增强批次：
 

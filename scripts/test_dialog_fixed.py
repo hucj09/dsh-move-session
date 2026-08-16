@@ -50,4 +50,20 @@ with sync_playwright() as p:
     page.click(".dsh-ms-btn:has-text('\u53d6\u6d88')")
     page.wait_for_timeout(400)
     print("7. dialog visible after cancel (2nd round):", page.locator(".dsh-ms-card").count() > 0)
+
+    # keep-mode success panel: submit -> done panel -> open moved session
+    # (regression: onClick previously cleared state before reading dialog.done.sessionId)
+    page.evaluate("() => { window.__openCalls = []; }")
+    page.click(".dsh-ms-header-button")
+    page.wait_for_timeout(300)
+    page.click(".dsh-ms-btn.primary")  # 迁移 (confirm, keep mode default)
+    page.wait_for_timeout(400)
+    print("8. success panel shown after keep submit:", page.locator(".dsh-ms-success").count() > 0)
+    print("   openCalls before open button (keep mode must not auto-open):", page.evaluate("() => window.__openCalls"))
+    page.click(".dsh-ms-btn.primary")  # open moved session
+    page.wait_for_timeout(400)
+    calls = page.evaluate("() => window.__openCalls")
+    print("9. openCalls after open button:", calls)
+    print("   moved session opened:", calls == ["new-1"])
+    print("   dialog closed after open:", page.locator(".dsh-ms-card").count() == 0)
     browser.close()

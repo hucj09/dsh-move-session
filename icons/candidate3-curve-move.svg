@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 起点圆点 → 流畅曲线 → 终点箭头：从 A 迁移到 B -->
+  <circle cx="3.5" cy="11.5" r="1.5"/>
+  <path d="M5.2 10.8C7.4 9.2 9 5.6 12.2 4.6"/>
+  <path d="M10.2 3.2 12.2 4.6 10.6 5.9"/>
+</svg>

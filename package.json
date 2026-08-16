@@ -1,0 +1,43 @@
+{
+  "name": "@linxin666/dsh-move-session",
+  "description": "Cross-workspace session migration for the dsh web GUI: a Move Session header action plus dialog (target workspace picker, keep-or-archive the original), idle-session only, full context preserved. Hot-pluggable — mounted via ~/.dsh/cordis.patch.yml + a profile node_modules symlink, no dsh source changes.",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md"
+  ],
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/client.js && npm test",
+    "test": "node --test",
+    "test:ui": "python scripts/test_dialog_fixed.py && python scripts/test_menu_injection.py",
+    "test:integrity": "python scripts/verify_integrity.py && python scripts/verify_chunks.py"
+  },
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhu1090093659/dsh-web-ui.git"
+  }
+}

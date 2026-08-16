@@ -1,0 +1,7 @@
+node_modules/
+*.log
+.DS_Store
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.pytest_cache/

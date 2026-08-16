@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Move Session 图标候选预览</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f4f5f7; color: #1f2328; margin: 0; padding: 32px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 11px; color: #6b7280; background: #f3f4f6; border-radius: 999px; padding: 2px 8px; font-weight: 500; }
+  .stage { display: flex; align-items: center; gap: 24px; padding: 16px 0; border-radius: 8px; background: repeating-linear-gradient(45deg, #fafafa, #fafafa 8px, #f6f6f6 8px, #f6f6f6 16px); justify-content: center; }
+  .stage img.lg { width: 64px; height: 64px; color: #1f2328; }
+  .stage img.sm { width: 16px; height: 16px; color: #1f2328; }
+  .stage .cap { font-size: 12px; color: #6b7280; }
+  pre { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 12px; font-size: 11px; overflow-x: auto; margin: 12px 0 0; }
+  .note { font-size: 12.5px; color: #6b7280; margin-top: 20px; line-height: 1.7; }
+  kbd { background: #eef2ff; color: #4338ca; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Move Session 图标候选</h1>
+  <div class="sub">三款 16×16 SVG（stroke 线条风格，与 dsh 官方图标体系一致）。选定后告诉我编号即可。</div>
+
+  <div class="card" style="margin-bottom:16px;border-color:#4f7cff;background:#f8faff;">
+    <h2>✅ 最终选定 <span class="badge">自定义：文件夹 + 移动箭头（填充式）</span></h2>
+    <div class="stage">
+      <img class="lg" src="move-session.svg" alt="最终图标 放大" style="filter:invert(1) hue-rotate(180deg);">
+      <img class="sm" src="move-session.svg" alt="最终图标 16px" style="filter:invert(1) hue-rotate(180deg);">
+      <span class="cap">1024×1024 填充式图标（iconfont 风格），颜色跟随主题（fill=currentColor）<br>已应用到：头部按钮（14px） + 行菜单注入项（16px）</span>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <div class="card">
+      <h2>候选 1 <span class="badge">文件夹 + 箭头</span></h2>
+      <div class="stage">
+        <img class="lg" src="candidate1-folder-arrow.svg" alt="候选1 放大">
+        <img class="sm" src="candidate1-folder-arrow.svg" alt="候选1 16px">
+      </div>
+      <div class="cap">经典"移入文件夹"语义，当前图标的精修版（完整文件夹 + 向下箭头）</div>
+      <pre>&lt;path d="M2 4.5V11a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 14 11V5.5A1.5 1.5 0 0 0 12.5 4H7.5L6 2.5H3.5A1.5 1.5 0 0 0 2 4Z"/&gt;
+&lt;path d="M8 6.5V10"/&gt;
+&lt;path d="M6.25 8.75 8 10.5l1.75-1.75"/&gt;</pre>
+    </div>
+
+    <div class="card">
+      <h2>候选 2 <span class="badge">卡片位移</span></h2>
+      <div class="stage">
+        <img class="lg" src="candidate2-card-move.svg" alt="候选2 放大">
+        <img class="sm" src="candidate2-card-move.svg" alt="候选2 16px">
+      </div>
+      <div class="cap">实线卡片 → 虚线目的地卡片 + 箭头：从一处"移动"到另一处，语义最直白</div>
+      <pre>&lt;rect x="1.5" y="3.5" width="5.5" height="9" rx="1"/&gt;
+&lt;rect x="9.5" y="3.5" width="5" height="9" rx="1" stroke-dasharray="2 1.5"/&gt;
+&lt;path d="M7 8h1.6"/&gt;
+&lt;path d="M8.6 6.6 10.2 8 8.6 9.4"/&gt;</pre>
+    </div>
+
+    <div class="card">
+      <h2>候选 3 <span class="badge">曲线迁移</span></h2>
+      <div class="stage">
+        <img class="lg" src="candidate3-curve-move.svg" alt="候选3 放大">
+        <img class="sm" src="candidate3-curve-move.svg" alt="候选3 16px">
+      </div>
+      <div class="cap">起点圆点 → 流畅曲线 → 终点箭头：从 A 迁移到 B，现代动感</div>
+      <pre>&lt;circle cx="3.5" cy="11.5" r="1.5"/&gt;
+&lt;path d="M5.2 10.8C7.4 9.2 9 5.6 12.2 4.6"/&gt;
+&lt;path d="M10.2 3.2 12.2 4.6 10.6 5.9"/&gt;</pre>
+    </div>
+
+  </div>
+  <div class="note">
+    查看方式：在右侧文件面板打开 <kbd>icons/candidate*.svg</kbd> 可直接看 16px 原尺寸；本页 <kbd>icons/preview.html</kbd> 有 64px 放大效果。<br>
+    选定后告诉我编号（如"候选 2"），我会把对应 SVG 同时替换到头部按钮与行菜单注入项两处；也可以在此基础上微调（粗细、开口方向、颜色等）。
+  </div>
+</body>
+</html>

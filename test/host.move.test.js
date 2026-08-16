@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { moveSession, sessionPresetId, lastModelOptions } from '../lib/index.js'
+import { moveSession, sessionPresetId, lastModelOptions, sourceTitle, migratedTitle, stripMsSuffix, msNumber } from '../lib/index.js'
 
 /* ------------------------------------------------------------------ */
 /* fixtures                                                            */
@@ -49,7 +49,7 @@ function makeRegistry(workspaces, shared = {}) {
 
 /** Build a fake ctx with recording agents/persistence/presets. */
 function makeCtx(overrides = {}) {
-  const calls = { created: [], mounted: [], archived: [], attached: [], flushed: false }
+  const calls = { created: [], mounted: [], archived: [], attached: [], renamed: [], flushed: false }
   const registry = makeRegistry(overrides.workspaces || [
     { id: 'w1', path: 'C:/ws1', title: 'WS1', sessionIds: ['src-1'] },
     { id: 'w2', path: 'C:/ws2', title: 'WS2', sessionIds: [] },
@@ -62,8 +62,25 @@ function makeCtx(overrides = {}) {
           get: (id) => (overrides.runningId === id ? { status: 'running' } : undefined),
           create: async (opts) => {
             calls.created.push(opts)
-            return { agent: {} }
+            return { agent: overrides.agentSession !== undefined ? { session: overrides.agentSession } : {} }
           },
+        }
+      }
+      if (name === 'sessionTitle') {
+        return {
+          rename: (session, title) => {
+            calls.renamed.push({ session, title })
+          },
+        }
+      }
+      if (name === 'sessionQuery') {
+        return {
+          readTitleSnapshots: async (sessionIds) =>
+            (overrides.targetTitles || []).map((title, index) => ({
+              sessionId: sessionIds[index] || 't-' + index,
+              status: 'fulfilled',
+              value: { session: {}, title: { title } },
+            })),
         }
       }
       if (name === 'sessions') {
@@ -151,6 +168,114 @@ test('lastModelOptions: inherits provider/model from the last request/header', (
 test('lastModelOptions: skips configs without provider/model', () => {
   assert.equal(lastModelOptions([{ type: 'request/header', data: { header: { config: {} } } }]), undefined)
   assert.equal(lastModelOptions([]), undefined)
+})
+
+/* ------------------------------------------------------------------ */
+/* moved-title marker (distinguishes same-named sessions)              */
+/* ------------------------------------------------------------------ */
+
+const TITLED_EVENTS = [
+  ...EVENTS,
+  { seq: 5, type: 'session/title', time: 1005, data: { title: '我的会话', messageSeqs: [0], source: { kind: 'provider' } } },
+]
+
+test('sourceTitle: returns the latest durable title', () => {
+  assert.equal(sourceTitle(TITLED_EVENTS), '我的会话')
+  assert.equal(sourceTitle(EVENTS), undefined)
+})
+
+test('stripMsSuffix / msNumber: marker helpers', () => {
+  assert.equal(stripMsSuffix('我的会话 [MS3]'), '我的会话')
+  assert.equal(stripMsSuffix('我的会话'), '我的会话')
+  assert.equal(stripMsSuffix('我的会话 [MS3] 后缀'), '我的会话 [MS3] 后缀') // anchored at the end only
+  assert.equal(msNumber('我的会话 [MS3]'), 3)
+  assert.equal(msNumber('我的会话'), 0)
+})
+
+test('migratedTitle: no suffix without a same-name session', () => {
+  assert.equal(migratedTitle('我的会话', new Set(['其他会话'])), '我的会话')
+  assert.equal(migratedTitle('我的会话', undefined), '我的会话')
+  assert.equal(migratedTitle(undefined, new Set(['x'])), undefined)
+})
+
+test('migratedTitle: appends [MS1] on a same-name collision', () => {
+  assert.equal(migratedTitle('我的会话', new Set(['我的会话'])), '我的会话 [MS1]')
+  // distinct from the fork numbering
+  assert.notEqual(migratedTitle('我的会话', new Set(['我的会话'])), '我的会话 (1)')
+  assert.notEqual(migratedTitle('我的会话', new Set(['我的会话'])), '我的会话（1）')
+})
+
+test('migratedTitle: repeated moves ascend without colliding', () => {
+  // target already holds the original plus [MS1] -> next is [MS2]
+  assert.equal(migratedTitle('我的会话', new Set(['我的会话', '我的会话 [MS1]'])), '我的会话 [MS2]')
+  // gaps are filled by max+1
+  assert.equal(migratedTitle('我的会话', new Set(['我的会话', '我的会话 [MS5]'])), '我的会话 [MS6]')
+})
+
+test('migratedTitle: re-moving an already-marked copy re-bases instead of accumulating', () => {
+  // moving "我的会话 [MS1]" into a workspace that already has it -> "我的会话 [MS2]"
+  assert.equal(migratedTitle('我的会话 [MS1]', new Set(['我的会话 [MS1]'])), '我的会话 [MS2]')
+  // …and stays untouched when there is no same-name
+  assert.equal(migratedTitle('我的会话 [MS1]', new Set(['我的会话'])), '我的会话 [MS1]')
+})
+
+/** Target workspace with existing sessions (so the same-name check runs). */
+const WS_WITH_SESSIONS = [
+  { id: 'w1', path: 'C:/ws1', title: 'WS1', sessionIds: ['src-1'] },
+  { id: 'w2', path: 'C:/ws2', title: 'WS2', sessionIds: ['t-1', 't-2'] },
+]
+
+test('moves rename the copy with [MS1] when the target has a same-name session', async () => {
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.renamed.length, 1)
+  assert.deepEqual(ctx.calls.renamed[0], { session: { id: 'copy-1' }, title: '我的会话 [MS1]' })
+})
+
+test('moves ascend the marker on repeated moves into the same workspace', async () => {
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话', '我的会话 [MS1]'], workspaces: WS_WITH_SESSIONS })
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.deepEqual(ctx.calls.renamed[0].title, '我的会话 [MS2]')
+})
+
+test('moves skip the rename when the target has no same-name session', async () => {
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['其他会话'], workspaces: WS_WITH_SESSIONS })
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.renamed.length, 0) // no title event written without a collision
+})
+
+test('moves skip the rename when sessionQuery is not mounted', async () => {
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
+  const originalGet = ctx.get
+  ctx.get = (name) => (name === 'sessionQuery' ? undefined : originalGet(name))
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.renamed.length, 0) // cannot check same-name -> keep the inherited title
+})
+
+test('moves skip the rename when the source has no title', async () => {
+  const ctx = makeCtx({ agentSession: { id: 'copy-1' } })
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.renamed.length, 0)
+})
+
+test('moves skip the rename when sessionTitle is not mounted', async () => {
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
+  const originalGet = ctx.get
+  ctx.get = (name) => (name === 'sessionTitle' ? undefined : originalGet(name))
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.renamed.length, 0)
+})
+
+test('moves survive a rename failure (title is presentation metadata)', async () => {
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
+  const originalGet = ctx.get
+  ctx.get = (name) =>
+    name === 'sessionTitle'
+      ? { rename: () => { throw new Error('title invalid') } }
+      : originalGet(name)
+  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(result.archived, false)
+  assert.equal(ctx.calls.created.length, 1)
 })
 
 /* ------------------------------------------------------------------ */

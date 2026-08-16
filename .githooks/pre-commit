@@ -1,0 +1,8 @@
+#!/bin/sh
+# pre-commit gate: run the full check (syntax + unit/structural tests) before
+# every commit. A failing gate blocks the commit (AGENTS.md rule 3).
+# Installed via `git config core.hooksPath .githooks`.
+set -e
+echo "[pre-commit] npm run check ..."
+npm run check
+echo "[pre-commit] OK"

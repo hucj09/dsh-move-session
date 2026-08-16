@@ -8,7 +8,7 @@ log, title, agent preset and model selection preserved), with a choice to **keep
 **archive the original**. Only **idle** sessions can be moved.
 
 > Current version **v0.1.1**. Same hot-pluggable convention as `dsh-ssh` / `dsh-task-board`:
-> mounted via `cordis.patch.yml` + a profile `node_modules` symlink, **no dsh source changes**.
+> mounted via `cordis.patch.yml` + a profile `node_modules` install, **no dsh source changes**.
 > Zero-dependency plain JavaScript, **source-as-artifact** (`lib/` is the runtime code), no build step.
 
 ---
@@ -36,6 +36,14 @@ Other details:
   event order are preserved byte-for-byte.
 - **Session-safe**: the copy gets a fresh id (`session-mv-<time36>-<seq36>`); nothing is
   overwritten or deleted; keep-mode leaves the source untouched.
+- **Same-name distinction**: only when the target workspace already holds a session with the
+  same title is the copy's title suffixed with **`[MS<n>]`** (e.g. `My session [MS1]`); `n` is one
+  above the highest `[MS<n>]` already present there, so repeated moves ascend without colliding and
+  re-moving an already-marked copy **replaces** the marker instead of accumulating. No same-name
+  means the title stays untouched; untitled sessions are left alone. Clearly different from the
+  fork numbering ` (1)` / `（1）`.
+- **Empty workspace support**: the move does not depend on the target workspace having any
+  sessions — a freshly added workspace is a valid target (its directory must exist).
 
 ---
 
@@ -98,8 +106,9 @@ Then **restart dsh web**.
      in the target workspace, with an "Open moved session" action;
    - **Archive the original session**: the source enters the archive set (hidden from all grouping
      surfaces; log and accounting retained) and the view navigates to the moved session.
-5. The sidebar updates instantly; the copy's title, messages, tool calls, model and preset match
-   the source.
+5. The sidebar updates instantly; the copy's messages, tool calls, model and preset match the
+   source; the title matches unless the target workspace already holds a same-named session, in
+   which case a `[MS<n>]` marker is appended (e.g. `My session [MS1]`).
 
 ---
 
@@ -107,9 +116,12 @@ Then **restart dsh web**.
 
 - **Host half** (`lib/index.js`): a loopback-only HTTP route `POST /api/dsh-move-session/move`,
   mirroring the shipped `session.fork` handler step by step: idle check → flush + read the full
-  log → target/same-workspace validation → mint a new identity (fresh id + target cwd + lineage) →
-  `agents.create` publishes the copy (seed = all events, setup composes the source preset via
-  `agentPresets.resolve/mount`) → `attachSession` accounting → `archiveSession` on request.
+  log → target/same-workspace validation → **target directory pre-check** (via the `fs` service;
+  a stale registry entry is rejected before any write) → mint a new identity (fresh id + target
+  cwd + lineage) → `agents.create` publishes the copy (seed = all events, setup composes the
+  source preset via `agentPresets.resolve/mount`) → **same-name title suffix** (`sessionQuery`
+  reads the target titles, `sessionTitle.rename` appends `[MS<n>]` on collision) →
+  `attachSession` accounting → `archiveSession` on request.
 - **Browser half** (`lib/client.js`): a standard web plugin bundle registering into the
   `conversation.session.header.actions` button slot and the `shell.overlay` dialog slot (both
   official additive slots, `replaceRisk: none`); the sidebar row-menu entry is injected via ARIA
@@ -125,9 +137,14 @@ Then **restart dsh web**.
 
 ```bash
 npm run check          # syntax check + all unit/structural tests (node --test); must be green before commits
-npm run test:ui        # Playwright interaction tests (dialog + row-menu injection; needs a local browser)
+npm run test:watch     # dev mode: re-runs all tests automatically on file changes
+npm run test:ui        # Playwright interaction tests (dialog + row-menu injection + theme; needs a local browser)
 npm run test:integrity # real migration log event-level consistency check (Python)
 ```
+
+**Automated gates**: `.githooks/pre-commit` runs `npm run check` automatically before every
+`git commit` (a failing gate blocks the commit); `.github/workflows/ci.yml` runs `npm run check`
+on every push/PR to GitHub.
 
 Collaboration rules for maintainers and AI assistants live in **AGENTS.md** (versioning, testing,
 commits, code invariants); release history in **docs/CHANGELOG.md**.

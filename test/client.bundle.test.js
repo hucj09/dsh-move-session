@@ -156,4 +156,7 @@ test('dialog palette follows the GUI theme (no hard-coded surface variables)', (
   assert.match(CLIENT, /'dsh-move-session: theme watcher'/)
   // the dialog also re-applies the palette synchronously when it opens
   assert.match(CLIENT, /if \(typeof applyTheme === 'function'\) applyTheme\(\)/)
+  // many workspaces: the target list scrolls independently (max-height)
+  assert.match(CLIENT, /dsh-ms-target-options/)
+  assert.match(CLIENT, /\.dsh-ms-target-options\{max-height:240px;overflow-y:auto/)
 })

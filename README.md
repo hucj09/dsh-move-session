@@ -7,7 +7,7 @@
 并支持**保留原会话**或**归档原会话**。仅支持**空闲会话**迁移。
 
 > 当前版本 **v0.1.1**。与 `dsh-ssh` / `dsh-task-board` 等插件同一套"热插拔"约定：
-> `cordis.patch.yml` 挂载 + profile node_modules 符号链接，**不改任何 dsh 源码**。
+> `cordis.patch.yml` 挂载 + profile node_modules 安装，**不改任何 dsh 源码**。
 > 本包为零依赖纯 JavaScript，**源码即产物**（`lib/` 即运行时文件），无需构建。
 
 ---
@@ -34,6 +34,11 @@
   与官方分叉的 lineage 语义一致；时间戳、事件顺序逐字节保留。
 - **多会话安全**：副本使用新会话 id（`session-mv-<time36>-<seq36>`），不覆盖、不删除任何
   现有记录；"保留原会话"模式中源会话完全不动。
+- **同名区分**：仅当目标工作区已存在同名会话时，副本标题追加 **`[MS<n>]`** 标记
+  （如 `我的会话 [MS1]`），`n` 取目标区已有 `[MS<n>]` 的最大值 + 1——重复迁移自动递增不冲突，
+  已带标记的副本再次迁移时**替换**而非累积；无同名则保持原标题，无标题会话不加。
+  与官方分叉的数字后缀 ` (1)` / `（1）` 明显不同。
+- **空工作区支持**：迁移不依赖目标工作区是否有会话，新工作区可直接作为迁移目标（目录需存在）。
 
 ---
 
@@ -92,7 +97,8 @@ dsh plugin --profile web remove @hucj/dsh-move-session
    - **保留原会话**（默认）：源会话原样保留，目标工作区生成完整副本，提供「打开迁移后的会话」；
    - **归档原会话**：源会话进入归档集合（从所有分组表面隐藏，日志与记账保留），
      视图自动跳转到迁移后的会话。
-5. 确认后侧边栏即时更新；副本的标题、全部消息、工具调用、模型与预设与源会话一致。
+5. 确认后侧边栏即时更新；副本的全部消息、工具调用、模型与预设与源会话一致；标题默认相同，
+   目标工作区已存在同名会话时自动追加 `[MS<n>]` 区分（如 `我的会话 [MS1]`）。
 
 ---
 
@@ -100,9 +106,11 @@ dsh plugin --profile web remove @hucj/dsh-move-session
 
 - **宿主端**（`lib/index.js`）：注册 loopback-only HTTP 路由 `POST /api/dsh-move-session/move`，
   处理流程与官方 `session.fork` 处理器逐段对应：空闲校验 → flush 后读取全量日志 →
-  目标/同区校验 → 铸造新身份（新 id + 目标 cwd + 血缘）→ `agents.create` 发布副本
-  （seed = 全量事件，setup 经 `agentPresets.resolve/mount` 组合源预设）→ `attachSession`
-  记账 → 按模式 `archiveSession` 归档源会话。
+  目标/同区校验 → **目标目录预检**（`fs` 服务，目录失效在任何写入前拒绝）→ 铸造新身份
+  （新 id + 目标 cwd + 血缘）→ `agents.create` 发布副本（seed = 全量事件，setup 经
+  `agentPresets.resolve/mount` 组合源预设）→ **同名标题后缀**（`sessionQuery` 读目标区标题，
+  同名时 `sessionTitle.rename` 追加 `[MS<n>]`）→ `attachSession` 记账 → 按模式
+  `archiveSession` 归档源会话。
 - **浏览器端**（`lib/client.js`）：标准 web 插件包，注册进 `conversation.session.header.actions`
   按钮插槽与 `shell.overlay` 对话框插槽（均为官方可加插槽，`replaceRisk: none`）；
   侧边栏行菜单项通过 ARIA role 锚点注入（官方菜单是 portal 渲染的 `[role="menu"]`，
@@ -116,9 +124,13 @@ dsh plugin --profile web remove @hucj/dsh-move-session
 
 ```bash
 npm run check         # 语法检查 + 全部单元/结构测试（node --test，提交前必须全绿）
-npm run test:ui       # Playwright 交互测试（对话框 + 行菜单注入，需本机浏览器）
+npm run test:watch    # 开发模式：文件变更自动重跑全部测试
+npm run test:ui       # Playwright 交互测试（对话框 + 行菜单注入 + 主题跟随，需本机浏览器）
 npm run test:integrity # 真实迁移日志逐事件一致性校验（Python）
 ```
+
+**自动化门禁**：`.githooks/pre-commit` 会在每次 `git commit` 前自动执行 `npm run check`
+（失败阻止提交）；`.github/workflows/ci.yml` 在 push/PR 到 GitHub 后自动执行 `npm run check`。
 
 维护者与 AI 助手的协作规则见 **AGENTS.md**（版本、测试、提交、代码不变量）；
 版本历史见 **docs/CHANGELOG.md**。

@@ -31,6 +31,7 @@
   "scripts": {
     "check": "node --check lib/index.js && node --check lib/client.js && npm test",
     "test": "node --test",
+    "test:watch": "node --test --watch",
     "test:ui": "python scripts/test_dialog_fixed.py && python scripts/test_menu_injection.py && python scripts/test_theme.py",
     "test:integrity": "python scripts/verify_integrity.py && python scripts/verify_chunks.py"
   },

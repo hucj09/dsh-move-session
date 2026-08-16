@@ -19,7 +19,7 @@
 
 | 角色 | 职责 |
 |------|------|
-| 维护者 | 最终决策、`dsh web` 重启、正式安装（`dsh plugin add link:`）、push 远程 |
+| 维护者 | 最终决策、`dsh web` 重启、正式安装（`dsh plugin add link:/file:`）、push 远程 |
 | AI 助手 | 实现、测试、文档；**不得擅自 push 远程或改动 profile 配置** |
 
 ## 强制性规则
@@ -37,9 +37,12 @@
 - **对话框关闭无条件**：`close()` 不得因 `busy` 而拒绝（迁移请求挂起时用户必须能关闭）
 - **默认模式 `keep`**（保留原会话），`keep` 选项渲染在 `archive` 之前
 - **宿主 `moveSession` 流程固定**：空闲校验 → flush live → `readFrom(0)` 全量日志 → 目标/同区校验 →
-  `mintSessionId` 新 id（`session-mv-<time36>-<seq36>`）→ `agents.create`（seed=全量事件，
-  meta 带 cwd/parentSession/seedLength/agentPreset/origin/delegationDepth）→ `attachSession` →
-  按模式 `archiveSession`
+  **目标目录预检**（`ctx.get('fs')` 的 `resolve`+`stat`，目录缺失 → `target-missing-dir`，
+  在任何写入前拒绝，不产生孤儿副本）→ `mintSessionId` 新 id（`session-mv-<time36>-<seq36>`）→
+  `agents.create`（seed=全量事件，meta 带 cwd/parentSession/seedLength/agentPreset/origin/delegationDepth）→
+  **同名标题后缀**（`sessionQuery.readTitleSnapshots(target.sessionIds)` 读目标区标题，同名时
+  `sessionTitle.rename` 追加 `[MS<n>]`，`n` = 目标区已有 `[MS<n>]` 最大值 + 1；无同名/无法查询/
+  已带标记时替换而非累积；失败一律降级不阻断）→ `attachSession` → 按模式 `archiveSession`
 - **模型继承**：agentOptions 取日志最后一条 `request/header` 的 provider/model；**预设继承**：
   取最后一条 `agent-preset/selected` 事件，否则 header.agentPreset
 - **客户端不得依赖 CSS 变量**：GUI 未定义 `--text-secondary` 等变量（实测），按钮用
@@ -51,6 +54,9 @@
 - **任何代码新增/优化必须配套测试**：已有同类测试则扩展，否则新建；无测试覆盖的改动视为未完成
 - `npm run check` = 语法检查（`node --check lib/*.js`）+ 全部单元/结构测试（`node --test`）——
   **每次版本提交前必须全绿**
+- **提交门禁已自动化**：`.githooks/pre-commit`（`git config core.hooksPath .githooks` 已设）会在
+  每次 `git commit` 前自动执行 `npm run check`，失败阻止提交；`.github/workflows/ci.yml` 在
+  push/PR 到 GitHub 后自动执行 `npm run check`。开发期可 `npm run test:watch`（文件变更自动重跑）
 - `test/host.move.test.js`（node:test）—— `moveSession` 全契约：校验/拒绝路径、happy path
   （archive/keep）、预设/模型继承、id 唯一性、失败包装（copy-failed/attach-failed/preset-unavailable）
 - `test/client.bundle.test.js`（node:test）—— client 结构不变量：bundle 注册 id、字典 key 集、
@@ -81,7 +87,7 @@ git tag v0.1.x && git push origin v0.1.x
 npm publish --registry=https://registry.npmjs.org        # 认证：~/.npmrc 中 granular token（bypass 2FA，仅限本包）
 npm view @hucj/dsh-move-session version --registry=https://registry.npmjs.org   # 验证
 
-# 版本递增：0.1.x（当前 0.1.0 → 下一 0.1.1）；每次发布前 npm run check
+# 版本递增：0.1.x（当前 0.1.1 → 下一 0.1.2）；每次发布前 npm run check
 # 发布后：~/.dsh/profiles/web/pnpm-workspace.yaml 的 minimumReleaseAgeExclude 更新为新版本
 #         （否则 2 天内 `dsh plugin add` 走 pnpm 会被 age 门槛拒绝）
 # 撤销（72h 内）：npm unpublish @hucj/dsh-move-session@<版本号> --force
@@ -96,7 +102,12 @@ npm view @hucj/dsh-move-session version --registry=https://registry.npmjs.org   
 
 ### 6. 命名与配置约定
 - npm 包名 `@hucj/dsh-move-session`；插件组合行 id `move-session`；client bundle id = 包名
-- 安装方式（正式版，维护者操作）：`dsh plugin --profile web add link:<本目录>` + 重启 dsh
+- 安装方式：开发调试用 `dsh plugin --profile web add link:<本目录>`（符号链接，改动即生效）；
+  **正式安装用 `dsh plugin --profile web add file:<本目录>`（一次性拷贝）** 或 npm 发布后
+  `dsh plugin --profile web add @hucj/dsh-move-session`；安装后重启 dsh web
+- **安装目录同步（file: 安装后每次代码改动必做）**：file: 为拷贝，源码后续改动不会自动同步。
+  同步完整清单：`lib/index.js` `lib/client.js` `package.json` `cordis.patch.yml` `README.md` `README.en.md`；
+  用 `Get-FileHash` 对比源与安装目录哈希一致
 - `lib/index.js` 导出 `moveSession` 等纯函数供测试（插件面仍是 `name`/`inject`/`apply`）
 
 ### 7. 已知教训（避免重犯）
@@ -105,6 +116,10 @@ npm view @hucj/dsh-move-session version --registry=https://registry.npmjs.org   
 - **Playwright evaluate 与 <script> 行为差异**：跨 evaluate 的函数对象 realm 可能使
   `instanceof` 失效——测试注入代码用 `add_script_tag`（与真实 bundle 的加载路径一致）
 - **Playwright 无授权页面不加载动态插件 client**：动态版 UI 验证需用户真实浏览器
+- **headless 下 timer 不稳定**：MutationObserver 的 setTimeout debounce 与 setInterval 在
+  headless Chromium 中经实测间歇失效（多次 6/6、5/5 失败对照实验），主题跟随改用 rAF 降频轮询
+  （每 5 帧检查亮度，实测稳定）；测试脚本避免"多行缩进 evaluate + wait_for_function"组合
+  （该写法在本环境不稳定，用单行拼接 evaluate + 直接读取）
 - **zstd 解压**：会话日志是 `session.jsonl.zstd`，需流式解压（`stream_reader`）
 
 ## 约定

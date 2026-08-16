@@ -53,7 +53,7 @@ function dictKeys(locale) {
 
 test('bundle registers under the package id via __ModuleLoader__.load', () => {
   assert.match(CLIENT, /window\.__ModuleLoader__\.load\(\{/)
-  assert.match(CLIENT, /id: '@linxin666\/dsh-move-session'/)
+  assert.match(CLIENT, /id: '@hucj\/dsh-move-session'/)
   assert.match(CLIENT, /exports\.apply = apply/)
   assert.match(CLIENT, /exports\.inject = \['slots', 'sessions', 'locale'\]/)
 })

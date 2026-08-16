@@ -1,30 +1,11 @@
-"""Verify the pkg-10 fixes with real React: force functional update + default keep."""
-import re
+"""Dialog interaction tests with real React: force functional update, default
+keep, unconditional close, reopen-after-cancel. The harness is a standalone
+copy of the component logic (scripts/dialog_harness.js, kept in sync with
+lib/client.js — see AGENTS.md rule 3)."""
 from playwright.sync_api import sync_playwright
 
-# reuse the test page scaffolding from test_dialog.py, but patch the two fixes
-src = open("scripts/test_dialog.py", encoding="utf-8").read()
-m = re.search(r"COMPONENT_JS = r\"\"\"(.*?)\"\"\"", src, re.S)
-COMPONENT_JS = m.group(1)
-
-# apply the SAME fixes as pkg-10: functional force update + default keep
-COMPONENT_JS = COMPONENT_JS.replace(
-    "for (var i = 0; i < listeners.length; i++) listeners[i]();",
-    "for (var i = 0; i < listeners.length; i++) listeners[i](function (n) { return n + 1; });",
-)
-COMPONENT_JS = COMPONENT_JS.replace(
-    "var modeState = React.useState('archive');",
-    "var modeState = React.useState('keep');",
-)
-COMPONENT_JS = COMPONENT_JS.replace(
-    "if (dialog.open) { setTargetId(null); setMode('archive'); }",
-    "if (dialog.open) { setTargetId(null); setMode('keep'); }",
-)
-# keep option first in the list
-COMPONENT_JS = COMPONENT_JS.replace(
-    "      modeOption('archive', t('dialog.archive'), t('dialog.archiveHint')),\n      modeOption('keep', t('dialog.keep'), t('dialog.keepHint'))",
-    "      modeOption('keep', t('dialog.keep'), t('dialog.keepHint')),\n      modeOption('archive', t('dialog.archive'), t('dialog.archiveHint'))",
-)
+with open("scripts/dialog_harness.js", encoding="utf-8") as f:
+    COMPONENT_JS = f.read()
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)

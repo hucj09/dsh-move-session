@@ -1,8 +1,13 @@
 # Changelog
 
-版本历史与发布记录。规则：仅代码/功能改动递增版本（见 AGENTS.md 规则 1）。
+`@hucj/dsh-move-session` 版本历史与发布记录（维护者视角；使用者文档见 README.md）。
 
-## v0.1.0 (2026-08-16)
+仓库：https://github.com/hucj09/dsh-move-session
+发布渠道：npm（官方源）+ GitHub（main + tag v0.1.x）
+
+---
+
+## v0.1.0（2026-08-16 · 待发布）
 
 首个版本：跨工作区会话迁移插件（dsh Web GUI）。
 

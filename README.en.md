@@ -41,21 +41,49 @@ Other details:
 
 ## Install
 
-Same hot-pluggable flow as dsh-ssh (no dsh source changes, no rebuild):
+### Option 1: after npm release (recommended)
 
 ```bash
-# 1. install as a link into the web profile (creates a node_modules symlink)
-dsh plugin --profile web add link:/path/to/dsh-move-session
-
-# 2. restart dsh (web profile), hard-refresh the browser
+dsh plugin --profile web add @hucj/dsh-move-session
 ```
 
-`cordis.patch.yml` (the `dsh.bundle.patch` manifest) inserts the `move-session` row into the
-profile composition; the `dsh.client` declaration makes clientModules serve the browser half at
-`/plugins/move-session/client.js`.
+### Option 2: local path (development)
 
-> To merge into the dsh-web-ui monorepo (`packages/dsh-move-session`), move the `lib/` contents
-> into `src/` and add a tsdown build config; `package.json` / `cordis.patch.yml` stay unchanged.
+```bash
+git clone git@github.com:hucj09/dsh-move-session.git   # or use the existing source directory
+cd dsh-move-session
+npm run check     # syntax check + all unit/structural tests (zero build — lib/ is the artifact)
+```
+
+Then install:
+
+```bash
+dsh plugin --profile web add link:/path/to/dsh-move-session
+```
+
+`link:` installs a **symlink**: after changing the source, re-run `npm run check` and restart dsh.
+(`file:` installs a one-time copy instead; later source changes are not synced automatically.)
+
+After installing, **restart dsh web** (new bundles only load on next start) and hard-refresh with
+**Ctrl+F5**; open any session — the header action row showing the "Move Session" button means the
+install succeeded.
+
+> Note: `dsh.client.inject` is empty; the plugin itself declares
+> `inject: ['slots', 'sessions', 'locale']` as hard dependencies, so the host needs the standard
+> web runtime (`@deepseek-ai/dsh-client-runtime` etc., present in default deployments).
+
+## Uninstall
+
+```bash
+dsh plugin --profile web remove @hucj/dsh-move-session
+```
+
+The command does three things:
+1. removes the dependency from `dependencies`
+2. removes the bundle row from `dsh.profile.bundles`
+3. deletes the `node_modules/@hucj/dsh-move-session` install directory
+
+Then **restart dsh web**.
 
 ---
 

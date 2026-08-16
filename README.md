@@ -39,20 +39,47 @@
 
 ## 安装
 
-与 dsh-ssh 完全一致的热插拔流程（无需改 dsh 源码、无需重新构建 dsh）：
+### 方式一：npm 发布后（推荐）
 
 ```bash
-# 1. 以 link 方式安装到 web profile（会在 profile node_modules 建符号链接）
-dsh plugin --profile web add link:/path/to/dsh-move-session
-
-# 2. 重启 dsh（web profile），浏览器强刷一次
+dsh plugin --profile web add @hucj/dsh-move-session
 ```
 
-`cordis.patch.yml`（`dsh.bundle.patch` 清单）会把 `move-session` 行插入 profile 组合；
-`dsh.client` 声明让 clientModules 服务在 `/plugins/move-session/client.js` 提供浏览器端。
+### 方式二：本地路径（开发调试）
 
-> 若并入 dsh-web-ui 全家桶仓库（packages/dsh-move-session），把 `lib/` 的内容移入 `src/`
-> 并补 tsdown 构建配置即可，`package.json` / `cordis.patch.yml` 无需改动。
+```bash
+git clone git@github.com:hucj09/dsh-move-session.git   # 或使用已有源码目录
+cd dsh-move-session
+npm run check     # 语法检查 + 全部单元/结构测试（本包零构建，lib/ 即产物）
+```
+
+然后安装：
+
+```bash
+dsh plugin --profile web add link:/path/to/dsh-move-session
+```
+
+`link:` 安装为**符号链接**：源码改动后重新运行 `npm run check` 即可，重启 dsh 生效。
+（也可用 `file:` 安装为一次性拷贝，源码后续改动不会自动同步。）
+
+安装后**重启 dsh web**（新 bundle 只在下次启动时加载），浏览器 **Ctrl+F5** 强刷，
+打开任意会话后头部操作行出现「迁移会话」按钮即安装成功。
+
+> 注：`dsh.client.inject` 为空、插件自身 `inject: ['slots', 'sessions', 'locale']` 声明硬依赖，
+> 宿主需已组装 `@deepseek-ai/dsh-client-runtime` 等标准 web 运行时（默认部署包含）。
+
+## 卸载
+
+```bash
+dsh plugin --profile web remove @hucj/dsh-move-session
+```
+
+该命令自动完成三件事：
+1. 从 `dependencies` 删除依赖
+2. 从 `dsh.profile.bundles` 删除 bundle 行
+3. 删除 `node_modules/@hucj/dsh-move-session` 安装目录
+
+之后**重启 dsh web** 生效。
 
 ---
 

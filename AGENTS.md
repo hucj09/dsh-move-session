@@ -9,7 +9,7 @@
 
 ## 项目定位
 
-插件包 **`@linxin666/dsh-move-session`**：DSH（DeepSeek Harness）Web GUI 的跨工作区会话迁移插件。
+插件包 **`@hucj/dsh-move-session`**：DSH（DeepSeek Harness）Web GUI 的跨工作区会话迁移插件。
 双端架构：Host 半体（`lib/index.js`：`moveSession` 核心逻辑 + `webServer` HTTP 路由
 `/api/dsh-move-session/move`）+ Client 半体（`lib/client.js`：`__ModuleLoader__` 浏览器捆绑包，
 头部操作行按钮 + `shell.overlay` 迁移对话框 + 侧边栏行菜单注入）。**源码即产物**：`lib/` 即运行时文件，
@@ -67,6 +67,27 @@
 - 版本提交格式参考历史：`v0.1.x: <改动摘要>`
 - 每次版本发布：`git tag v0.1.x`（与 package.json 同步）
 
+**发布流程（维护者操作，README 不收录，以此为准）**：
+
+```bash
+# 发布前：npm run check 全绿；版本号已在 package.json 递增
+npm run check
+
+# GitHub（origin 需先配置 git@github.com:hucj09/dsh-move-session.git）
+git push origin main
+git tag v0.1.x && git push origin v0.1.x
+
+# npm（本机 registry 是 npmmirror 镜像，发布必须临时指定官方源）
+npm publish --registry=https://registry.npmjs.org        # 认证：~/.npmrc 中 granular token（bypass 2FA，仅限本包）
+npm view @hucj/dsh-move-session version --registry=https://registry.npmjs.org   # 验证
+
+# 版本递增：0.1.x（当前 0.1.0 → 下一 0.1.1）；每次发布前 npm run check
+# 发布后：~/.dsh/profiles/web/pnpm-workspace.yaml 的 minimumReleaseAgeExclude 更新为新版本
+#         （否则 2 天内 `dsh plugin add` 走 pnpm 会被 age 门槛拒绝）
+# 撤销（72h 内）：npm unpublish @hucj/dsh-move-session@<版本号> --force
+# 弃用（推荐替代）：npm deprecate @hucj/dsh-move-session@<版本号> "说明"
+```
+
 ### 5. 文档同步（强制）
 - **README.md 与 README.en.md 必须同步**：任何 README.md 修改必须同时更新 README.en.md
   对应内容（结构一致、内容对应翻译），两者一起提交
@@ -74,7 +95,7 @@
 - 版本历史追加到 `docs/CHANGELOG.md`（README 不维护版本快照）
 
 ### 6. 命名与配置约定
-- npm 包名 `@linxin666/dsh-move-session`；插件组合行 id `move-session`；client bundle id = 包名
+- npm 包名 `@hucj/dsh-move-session`；插件组合行 id `move-session`；client bundle id = 包名
 - 安装方式（正式版，维护者操作）：`dsh plugin --profile web add link:<本目录>` + 重启 dsh
 - `lib/index.js` 导出 `moveSession` 等纯函数供测试（插件面仍是 `name`/`inject`/`apply`）
 

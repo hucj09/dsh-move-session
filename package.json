@@ -38,7 +38,7 @@
   "engines": {
     "node": ">=22"
   },
-  "license": "BSD-3-Clause",
+  "license": "MIT",
   "author": "hucj",
   "repository": {
     "type": "git",

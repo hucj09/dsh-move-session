@@ -173,4 +173,4 @@ npm run test:integrity # 真实迁移日志逐事件一致性校验（Python）
 
 ## License
 
-BSD-3-Clause
+MIT

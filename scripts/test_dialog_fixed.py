@@ -3,16 +3,21 @@ keep, unconditional close, reopen-after-cancel. The harness is a standalone
 copy of the component logic (scripts/dialog_harness.js, kept in sync with
 lib/client.js — see AGENTS.md rule 3)."""
 from playwright.sync_api import sync_playwright
+import os
 
 with open("scripts/dialog_harness.js", encoding="utf-8") as f:
     COMPONENT_JS = f.read()
+
+# React UMD builds live inside the dsh profile; resolve via ~ so the test
+# never hard-codes a user-specific absolute path (see AGENTS.md rule 6).
+PROFILE_NODE_MODULES = os.path.join(os.path.expanduser("~"), ".dsh", "profiles", "node_modules")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page()
     page.set_content('<!doctype html><html><body><div id="button-host"></div><div id="dialog-host"></div></body></html>')
-    page.add_script_tag(path=r"~\.dsh\profiles\node_modules\react\umd\react.production.min.js")
-    page.add_script_tag(path=r"~\.dsh\profiles\node_modules\react-dom\umd\react-dom.production.min.js")
+    page.add_script_tag(path=os.path.join(PROFILE_NODE_MODULES, "react", "umd", "react.production.min.js"))
+    page.add_script_tag(path=os.path.join(PROFILE_NODE_MODULES, "react-dom", "umd", "react-dom.production.min.js"))
     page.add_script_tag(content=COMPONENT_JS)
     page.wait_for_timeout(500)
 

@@ -193,4 +193,4 @@ commits, code invariants); release history in **docs/CHANGELOG.md**.
 
 ## License
 
-BSD-3-Clause
+MIT

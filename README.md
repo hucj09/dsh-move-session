@@ -6,7 +6,7 @@
 将当前会话**原封不动**地复制到另一个工作区（完整保留对话日志、标题、Agent 预设、模型选择），
 并支持**保留原会话**或**归档原会话**。仅支持**空闲会话**迁移。
 
-> 当前版本 **v0.1.4**，适配 **DSH 0.2.x**（桌面端 0.2.0-rc.2 起）。与 `dsh-ssh` / `dsh-task-board`
+> 当前版本 **v0.1.5**，适配 **DSH 0.2.x**（桌面端 0.2.0-rc.2 起）。与 `dsh-ssh` / `dsh-task-board`
 > 等插件同一套"热插拔"约定：`cordis.patch.yml` 挂载 + profile node_modules 安装，
 > **不改任何 dsh 源码**。本包为零依赖纯 JavaScript，**源码即产物**（`lib/` 即运行时文件），无需构建。
 
@@ -41,6 +41,14 @@
   已带标记的副本再次迁移时**替换**而非累积；无同名则保持原标题，无标题会话不加。
   与官方分叉的数字后缀 ` (1)` / `（1）` 明显不同。
 - **空工作区支持**：迁移不依赖目标工作区是否有会话，新工作区可直接作为迁移目标（目录需存在）。
+- **迁移后置顶**：迁移成功后副本会写入 registry 全局置顶集合（`workspaceRegistry.pinSession`），
+  因此它出现在目标工作区**最上方**（「新会话」行之下），并显示「刚刚」。这一步是必要的：
+  侧边栏的**手动排序**只把已知成员排在前、把新出现的成员追加到**末尾**——官方内置的
+  "分叉子会话插到父会话前面"规则对跨工作区迁移不适用（源会话在另一个工作区、不属同一分组）。
+  > 若不想让副本自动置顶（它会像手动置顶一样保留在置顶集合里，需手动取消），
+  > 在 profile 的 patch 层给该行加 `config.pinOnMove: false` 即可，例如
+  > `- id: move-session` + `name: '@hucj/dsh-move-session'` + `config: { pinOnMove: false }`。
+  > 用默认的**最近更新**排序时，副本本来就会因为时间最新而排在最前。
 
 ![迁移会话示例](docs/images/example1.png)
 
@@ -123,7 +131,9 @@ dsh plugin --profile web remove @hucj/dsh-move-session
   铸造新身份（新 id + 目标 cwd + 血缘）→ `agents.create` 发布副本（`seed` = 全量事件、
   `inheritedEventCount` = 全量事件数、`meta.isSeeded: true`，setup 经
   `agentPresets.resolve/mount` 组合源预设）→ **同名标题后缀**（`sessionQuery` 读目标区标题，
-  同名时 `sessionTitle.rename` 追加 `[MS<n>]`）→ `attachSession` 记账 → 按模式 `archiveSession` 归档源会话。
+  同名时 `sessionTitle.rename` 追加 `[MS<n>]`）→ `attachSession` 记账 →
+  `pinSession` 置顶副本（受 `config.pinOnMove` 控制，默认开；失败不阻断迁移）→
+  按模式 `archiveSession` 归档源会话。
 - **浏览器端**（`lib/client.js`）：标准 web 插件包，注册进三个官方可加插槽
   （`replaceRisk: none`）：`conversation.session.header.actions` 按钮、
   `sidebar.workspaces.session.menu.item` 会话行菜单项、`shell.overlay` 迁移对话框；

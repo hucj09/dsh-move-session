@@ -7,7 +7,7 @@ session operations: copy the current session **as-is** into another workspace (f
 log, title, agent preset and model selection preserved), with a choice to **keep the original** or
 **archive the original**. Only **idle** sessions can be moved.
 
-> Current version **v0.1.4**, targeting **DSH 0.2.x** (desktop 0.2.0-rc.2 and later). Same
+> Current version **v0.1.5**, targeting **DSH 0.2.x** (desktop 0.2.0-rc.2 and later). Same
 > hot-pluggable convention as `dsh-ssh` / `dsh-task-board`: mounted via `cordis.patch.yml` + a
 > profile `node_modules` install, **no dsh source changes**. Zero-dependency plain JavaScript,
 > **source-as-artifact** (`lib/` is the runtime code), no build step.
@@ -47,6 +47,17 @@ Other details:
   fork numbering ` (1)` / `（1）`.
 - **Empty workspace support**: the move does not depend on the target workspace having any
   sessions — a freshly added workspace is a valid target (its directory must exist).
+- **The copy leads its new workspace**: after a successful move the copy is added to the
+  registry-global pin set (`workspaceRegistry.pinSession`), so it appears at the **top** of the
+  target group (right under the "New Session" row) showing "just now". This is necessary: the
+  sidebar's **manual** ordering keeps known members first and appends members it has never seen to
+  the **end** — DSH's built-in "a fork child is placed before its parent" rule cannot apply to a
+  cross-workspace move, because the source lives in a different group.
+  > To leave the target workspace's ordering untouched, add `config.pinOnMove: false` to the row in
+  > the profile's patch layer (`- id: move-session`, `name: '@hucj/dsh-move-session'`,
+  > `config: { pinOnMove: false }`). Note the pin behaves like a manual pin: it stays in the pin set
+  > until you unpin it. Under the default **Last updated** ordering the copy is newest anyway and
+  > needs no pin.
 
 ![Move session example](docs/images/example1.png)
 
@@ -138,7 +149,8 @@ Then **restart dsh web**.
   events, `inheritedEventCount` = event count, `meta.isSeeded: true`; setup composes the source
   preset via `agentPresets.resolve/mount`) → **same-name title suffix** (`sessionQuery` reads the
   target titles, `sessionTitle.rename` appends `[MS<n>]` on collision) → `attachSession`
-  accounting → `archiveSession` on request.
+  accounting → `pinSession` to lead the target group (governed by `config.pinOnMove`, default on;
+  a failure never fails the move) → `archiveSession` on request.
 - **Browser half** (`lib/client.js`): a standard web plugin bundle registering into three official
   additive slots (`replaceRisk: none`): the `conversation.session.header.actions` button,
   the `sidebar.workspaces.session.menu.item` session-row menu entry, and the `shell.overlay` move

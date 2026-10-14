@@ -27,7 +27,7 @@ client bundle id = 包名。
 ## 强制性规则
 
 ### 1. 版本号
-- 当前 **v0.1.4**，保持 **0.1.x 递增**，禁止跳到 0.2.x
+- 当前 **v0.1.5**，保持 **0.1.x 递增**，禁止跳到 0.2.x
 - **仅代码/功能改动才递增版本号**；纯文档/规则修改不递增，正常提交即可
 - `package.json.version` 与 git tag `v0.1.x` 保持一致
 - 每次版本提交前必须通过下方 2/3 项
@@ -47,7 +47,15 @@ client bundle id = 包名。
   meta 带 cwd/parentSession/agentPreset/origin/delegationDepth）→ **同名标题后缀**
   （`sessionQuery.readTitleSnapshots(target.sessionIds)` 读目标区标题，同名时
   `sessionTitle.rename` 追加 `[MS<n>]`，`n` = 目标区已有 `[MS<n>]` 最大值 + 1；无同名/无法查询/
-  已带标记时替换而非累积；失败一律降级不阻断）→ `attachSession` → 按模式 `archiveSession`
+  已带标记时替换而非累积；失败一律降级不阻断）→ `attachSession` →
+  **`registry.pinSession(newId)` 置顶副本**（顺序固定：attach 之后、archive 之前；失败不阻断迁移）
+  → 按模式 `archiveSession`
+- **部署选项必须经 `resolveOptions` 解析，默认值只在那里**：`moveSession(ctx, input, options)` 的
+  `options` 由调用方传入且**不做默认**（缺字段即崩，属显式契约）；`apply(ctx, config)` 在激活时
+  解析一次，配置非法则插件加载失败（fail loud）。当前唯一选项 **`pinOnMove`，默认 `true`**：
+  副本必须置顶，因为侧边栏**手动排序**会把新出现的成员追加到分组末尾，而官方"分叉子会话插到
+  父会话前面"的规则对跨工作区迁移不适用（源会话不在同一分组）；`workspaceRegistry.pinSession`
+  是两种排序都会读的唯一杠杆
 - **禁止 `meta.seedLength`**：DSH ≥ 0.2 的 session header 校验对该字段**直接抛错**
   （`session header has invalid field "seedLength"`），迁移会全量失败；继承语义改由
   `isSeeded` + `inheritedEventCount` 表达

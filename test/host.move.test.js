@@ -9,7 +9,15 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { moveSession, sessionPresetId, lastModelOptions, sourceTitle, observeSource, migratedTitle, stripMsSuffix, msNumber } from '../lib/index.js'
+import { moveSession, resolveOptions, sessionPresetId, lastModelOptions, sourceTitle, observeSource, migratedTitle, stripMsSuffix, msNumber } from '../lib/index.js'
+
+/**
+ * Call the move with an explicit deployment spec. `moveSession` performs no
+ * option defaulting (resolveOptions owns the defaults), so every call names
+ * the pin choice; most contract cases below are about the move itself, and
+ * pinning off keeps them independent of it.
+ */
+const move = (ctx, input, options = { pinOnMove: false }) => moveSession(ctx, input, options)
 
 /* ------------------------------------------------------------------ */
 /* fixtures                                                            */
@@ -48,19 +56,29 @@ function makeRegistry(workspaces, shared) {
         },
         attachSession: async (sid) => {
           shared.attached.push(sid)
+          shared.order.push(`attach:${sid}`)
         },
       }
     },
     list: () => workspaces,
     archiveSession: async (id) => {
       shared.archived.push(id)
+      shared.order.push(`archive:${id}`)
+    },
+    pinSession: async (id) => {
+      if (shared.pinError !== undefined) throw shared.pinError
+      shared.pinned.push(id)
+      shared.order.push(`pin:${id}`)
     },
   }
 }
 
 /** Build a fake ctx with recording agents/sessionQuery/presets. */
 function makeCtx(overrides = {}) {
-  const calls = { created: [], mounted: [], archived: [], attached: [], renamed: [], flushed: false, disposed: 0 }
+  const calls = {
+    created: [], mounted: [], archived: [], attached: [], renamed: [], pinned: [], order: [],
+    flushed: false, disposed: 0, pinError: overrides.pinError,
+  }
   const registry = makeRegistry(overrides.workspaces || [WS1, WS2], calls)
   const ctx = {
     calls,
@@ -259,26 +277,26 @@ test('migratedTitle: re-moving an already-marked copy re-bases instead of accumu
 
 test('moves rename the copy with [MS1] when the target has a same-name session', async () => {
   const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: [WS1, WS2_FILLED] })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 1)
   assert.deepEqual(ctx.calls.renamed[0], { session: { id: 'copy-1' }, title: '我的会话 [MS1]' })
 })
 
 test('moves ascend the marker on repeated moves into the same workspace', async () => {
   const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话', '我的会话 [MS1]'], workspaces: [WS1, WS2_FILLED] })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.deepEqual(ctx.calls.renamed[0].title, '我的会话 [MS2]')
 })
 
 test('moves skip the rename when the target has no same-name session', async () => {
   const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['其他会话'], workspaces: [WS1, WS2_FILLED] })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 0) // no title event written without a collision
 })
 
 test('moves skip the rename when the target holds no other session to compare with', async () => {
   const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'] })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 0)
 })
 
@@ -289,13 +307,13 @@ test('moves skip the rename when the title query fails', async () => {
     titleQueryError: new Error('index unavailable'),
     workspaces: [WS1, WS2_FILLED],
   })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 0) // cannot check same-name -> keep the inherited title
 })
 
 test('moves skip the rename when the source has no title', async () => {
   const ctx = makeCtx({ agentSession: { id: 'copy-1' } })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 0)
 })
 
@@ -303,7 +321,7 @@ test('moves skip the rename when sessionTitle is not mounted', async () => {
   const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: [WS1, WS2_FILLED] })
   const originalGet = ctx.get
   ctx.get = (name) => (name === 'sessionTitle' ? undefined : originalGet(name))
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 0)
 })
 
@@ -314,7 +332,7 @@ test('moves survive a rename failure (title is presentation metadata)', async ()
     name === 'sessionTitle'
       ? { rename: () => { throw new Error('title invalid') } }
       : originalGet(name)
-  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  const result = await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(result.archived, false)
   assert.equal(ctx.calls.created.length, 1)
 })
@@ -324,20 +342,20 @@ test('moves survive a rename failure (title is presentation metadata)', async ()
 /* ------------------------------------------------------------------ */
 
 test('rejects missing sessionId', async () => {
-  await assert.rejects(() => moveSession(makeCtx(), { targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'invalid-session')
+  await assert.rejects(() => move(makeCtx(), { targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'invalid-session')
 })
 
 test('rejects missing targetWorkspaceId', async () => {
-  await assert.rejects(() => moveSession(makeCtx(), { sessionId: 'src-1', mode: 'keep' }), (e) => e.code === 'invalid-target')
+  await assert.rejects(() => move(makeCtx(), { sessionId: 'src-1', mode: 'keep' }), (e) => e.code === 'invalid-target')
 })
 
 test('rejects unknown mode', async () => {
-  await assert.rejects(() => moveSession(makeCtx(), { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'nope' }), (e) => e.code === 'invalid-mode')
+  await assert.rejects(() => move(makeCtx(), { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'nope' }), (e) => e.code === 'invalid-mode')
 })
 
 test('rejects when required services are unavailable', async () => {
   const bare = { get: () => undefined }
-  await assert.rejects(() => moveSession(bare, { sessionId: 's', targetWorkspaceId: 'w', mode: 'keep' }), (e) => e.code === 'unavailable')
+  await assert.rejects(() => move(bare, { sessionId: 's', targetWorkspaceId: 'w', mode: 'keep' }), (e) => e.code === 'unavailable')
 })
 
 /* ------------------------------------------------------------------ */
@@ -346,7 +364,7 @@ test('rejects when required services are unavailable', async () => {
 
 test('rejects a running session', async () => {
   const ctx = makeCtx({ runningId: 'src-1' })
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-busy')
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-busy')
 })
 
 /* ------------------------------------------------------------------ */
@@ -355,17 +373,17 @@ test('rejects a running session', async () => {
 
 test('rejects an unknown session', async () => {
   const ctx = makeCtx({ missingId: 'ghost' })
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'ghost', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-not-found')
+  await assert.rejects(() => move(ctx, { sessionId: 'ghost', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-not-found')
 })
 
 test('rejects when the source observation fails', async () => {
   const ctx = makeCtx({ observeError: new Error('disk on fire') })
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-not-found')
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-not-found')
 })
 
 test('flushes a live source session before reading', async () => {
   const ctx = makeCtx({ liveId: 'src-1' })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.flushed, true)
 })
 
@@ -375,13 +393,13 @@ test('flushes a live source session before reading', async () => {
 
 test('rejects an unknown target workspace', async () => {
   const ctx = makeCtx({ workspaces: [WS1] })
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w9', mode: 'keep' }), (e) => e.code === 'target-not-found')
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w9', mode: 'keep' }), (e) => e.code === 'target-not-found')
 })
 
 test('rejects a stale target workspace whose directory is gone — before any write', async () => {
   const ctx = makeCtx({ workspaces: [WS1, { ...WS2, status: 'missing-dir' }] })
   await assert.rejects(
-    () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
+    () => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
     (e) => e.code === 'target-missing-dir',
   )
   // the copy must NOT be created: no orphan sessions
@@ -393,7 +411,7 @@ test('rejects a stale target workspace whose directory is gone — before any wr
 test('rejects when the target directory cannot be resolved', async () => {
   const ctx = makeCtx({ workspaces: [WS1, { ...WS2, statusError: new Error('ENOENT: no such file or directory') }] })
   await assert.rejects(
-    () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
+    () => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
     (e) => e.code === 'target-missing-dir',
   )
   assert.equal(ctx.calls.created.length, 0)
@@ -401,7 +419,7 @@ test('rejects when the target directory cannot be resolved', async () => {
 
 test('rejects moving into the session\'s own workspace', async () => {
   const ctx = makeCtx()
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w1', mode: 'keep' }), (e) => e.code === 'same-workspace')
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w1', mode: 'keep' }), (e) => e.code === 'same-workspace')
 })
 
 /* ------------------------------------------------------------------ */
@@ -410,7 +428,7 @@ test('rejects moving into the session\'s own workspace', async () => {
 
 test('archive mode: creates the copy, attaches it, archives the source', async () => {
   const ctx = makeCtx()
-  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'archive' })
+  const result = await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'archive' })
   assert.equal(result.archived, true)
   assert.match(result.sessionId, /^session-mv-/)
   assert.equal(ctx.calls.created.length, 1)
@@ -437,7 +455,7 @@ test('regression: the copy meta carries no retired "seedLength" field', async ()
   // DSH >= 0.2 rejects an unknown session-header field by throwing
   // ('session header has invalid field "seedLength"'), which failed every move.
   const ctx = makeCtx()
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   const opts = ctx.calls.created[0]
   assert.equal(Object.hasOwn(opts.meta, 'seedLength'), false)
   assert.equal(Object.hasOwn(opts.meta, 'isSeeded'), true)
@@ -448,7 +466,7 @@ test('regression: the copy meta carries no retired "seedLength" field', async ()
 
 test('keep mode: creates the copy but never archives the source', async () => {
   const ctx = makeCtx()
-  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  const result = await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(result.archived, false)
   assert.equal(ctx.calls.created.length, 1)
   assert.deepEqual(ctx.calls.archived, [])
@@ -459,7 +477,7 @@ test('copies header origin/delegationDepth into the copy meta', async () => {
   const ctx = makeCtx({
     header: { ...HEADER, origin: 'subagent', delegationDepth: 2 },
   })
-  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   const meta = ctx.calls.created[0].meta
   assert.equal(meta.origin, 'subagent')
   assert.equal(meta.delegationDepth, 2)
@@ -469,7 +487,7 @@ test('works without an agentPresets service (host-composition deployments)', asy
   const ctx = makeCtx()
   const originalGet = ctx.get
   ctx.get = (name) => (name === 'agentPresets' ? undefined : originalGet(name))
-  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  const result = await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   const opts = ctx.calls.created[0]
   assert.equal(opts.meta.agentPreset, undefined)
   assert.equal(opts.setup, undefined)
@@ -478,9 +496,64 @@ test('works without an agentPresets service (host-composition deployments)', asy
 
 test('mints distinct ids across calls', async () => {
   const ctx = makeCtx()
-  const a = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
-  const b = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  const a = await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  const b = await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.notEqual(a.sessionId, b.sessionId)
+})
+
+/* ------------------------------------------------------------------ */
+/* deployment options: pinOnMove                                       */
+/* ------------------------------------------------------------------ */
+
+test('resolveOptions: an absent config pins by default', () => {
+  assert.deepEqual(resolveOptions(undefined), { pinOnMove: true })
+  assert.deepEqual(resolveOptions(null), { pinOnMove: true })
+  assert.deepEqual(resolveOptions({}), { pinOnMove: true })
+})
+
+test('resolveOptions: an explicit flag wins', () => {
+  assert.deepEqual(resolveOptions({ pinOnMove: false }), { pinOnMove: false })
+  assert.deepEqual(resolveOptions({ pinOnMove: true }), { pinOnMove: true })
+})
+
+test('resolveOptions: a malformed config fails loud', () => {
+  assert.throws(() => resolveOptions('pinOnMove'), /config must be an object/)
+  assert.throws(() => resolveOptions([]), /config must be an object/)
+  assert.throws(() => resolveOptions({ pinOnMove: 'yes' }), /config\.pinOnMove must be a boolean/)
+})
+
+test('pinOnMove: the copy is pinned so it leads the target group', async () => {
+  const ctx = makeCtx()
+  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }, { pinOnMove: true })
+  assert.equal(result.pinned, true)
+  // pinning is registry-global and names the copy, not the source
+  assert.deepEqual(ctx.calls.pinned, [result.sessionId])
+  // the copy must already be accounted before it is pinned, and the source is
+  // archived last: attach -> pin -> archive
+  assert.deepEqual(ctx.calls.order, [`attach:${result.sessionId}`, `pin:${result.sessionId}`])
+})
+
+test('pinOnMove: archive mode still archives after pinning', async () => {
+  const ctx = makeCtx()
+  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'archive' }, { pinOnMove: true })
+  assert.equal(result.archived, true)
+  assert.deepEqual(ctx.calls.order, [`attach:${result.sessionId}`, `pin:${result.sessionId}`, 'archive:src-1'])
+})
+
+test('pinOnMove: false leaves the registry pin set untouched', async () => {
+  const ctx = makeCtx()
+  const result = await move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(result.pinned, false)
+  assert.deepEqual(ctx.calls.pinned, [])
+})
+
+test('a pin failure never fails a completed move', async () => {
+  const ctx = makeCtx({ pinError: new Error('registry write failed') })
+  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }, { pinOnMove: true })
+  assert.equal(result.pinned, false)
+  assert.match(result.sessionId, /^session-mv-/)
+  assert.equal(ctx.calls.created.length, 1)
+  assert.deepEqual(ctx.calls.attached, [result.sessionId])
 })
 
 /* ------------------------------------------------------------------ */
@@ -494,7 +567,7 @@ test('wraps agents.create failures as copy-failed', async () => {
     name === 'agents'
       ? { get: () => undefined, create: async () => { throw new Error('boom') } }
       : originalGet(name)
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'copy-failed')
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'copy-failed')
 })
 
 test('wraps attach failures as attach-failed', async () => {
@@ -512,7 +585,7 @@ test('wraps attach failures as attach-failed', async () => {
       } : registry.get(id)),
     }
   }
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'attach-failed')
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'attach-failed')
 })
 
 test('wraps preset resolution failures as preset-unavailable', async () => {
@@ -522,7 +595,7 @@ test('wraps preset resolution failures as preset-unavailable', async () => {
     name === 'agentPresets'
       ? { resolve: async () => { throw new Error('unknown preset') }, mount: async () => {} }
       : originalGet(name)
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'preset-unavailable')
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'preset-unavailable')
 })
 
 test('archive failures propagate as-is (registry is the authority)', async () => {
@@ -533,5 +606,5 @@ test('archive failures propagate as-is (registry is the authority)', async () =>
     if (name !== 'workspaceRegistry') return originalGet(name)
     return { ...registry, archiveSession: async () => { throw new Error('durability failed') } }
   }
-  await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'archive' }), /durability failed/)
+  await assert.rejects(() => move(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'archive' }), /durability failed/)
 })

@@ -7,7 +7,36 @@
 
 ---
 
-## v0.1.4（2026-10-13 · 待发布）
+## v0.1.5（2026-10-14 · 待发布）
+
+迁移后的副本改为**在目标工作区置顶显示**（`pinOnMove`，默认开）。
+
+- **发布物补全**：`package.json.files` 增加 `docs/images`——README 引用的 `example1.png` 此前
+  不在发布物里，npm 包页面上是裂图（v0.1.3 起如此）；现随包发布（约 +383KB）。
+- **现象**：迁移成功后，副本排在目标工作区**最底部**。
+- **实测结论（隔离 `DSH_HOME` + 真实桌面 CLI 0.2.0-rc.2）**：副本的 `updatedAt` **本来就是迁移
+  时刻**（`session/list` 返回迁移那一刻，行上显示「刚刚」），时间无需"刷新"；位置完全由侧边栏
+  **排序方式**决定——默认的 `最近更新` 下副本已在最前，而**手动排序**下 DSH 把"已知成员"排在
+  前、把"首次出现的成员"追加到末尾（`reconcileManualOrder` = `[置顶, 已保存顺序, 新成员按时间,
+  已归档]`）。官方唯一的例外是"分叉子会话插到父会话紧前面"，但跨工作区迁移的源会话不在同一分组，
+  这条例外不触发。手动序存在浏览器 localStorage，宿主侧无法改写。
+  已从用户桌面端 leveldb（`dsh.workspace.view.v5`）确认其设置为 `"orderBy":"manual"`。
+- **修复**：迁移流程在 `attachSession` 之后、`archiveSession` 之前调用
+  `workspaceRegistry.pinSession(newId)`。registry 全局置顶集合是**两种排序模式都会读取**的唯一
+  杠杆（`reconcileManualOrder` 把置顶集合排在最前）。置顶失败**不阻断**已完成迁移
+  （副本已创建并记账），HTTP 响应新增 `pinned` 字段。
+- **可关闭**：新增插件部署选项 **`config.pinOnMove`（默认 `true`）**，经
+  `resolveOptions(config)` 在激活时解析一次（非法配置使插件加载失败，fail loud），
+  `moveSession(ctx, input, options)` 本身不做默认。在 profile 的 patch 层给该行加
+  `config: { pinOnMove: false }` 即可恢复"副本按目标区原排序落到末尾"。注意置顶会像手动置顶一样
+  保留在置顶集合里，需手动取消。
+- **实测验证**：手动排序下迁移前后对比——迁移前 DST = `[新会话, A, B, C]`；迁移后
+  DST = `[新会话, session-mv-…(刚刚), A, B, C]`，且 `pinnedSessionIds` 增加该副本；
+  加 `pinOnMove: false` 覆盖层重启后同一迁移返回 `"pinned":false` 且置顶集合保持为空。
+- **测试**：`node --test` **69 用例**（新增 `resolveOptions` 默认/显式/非法三组、置顶开关、
+  attach→pin→archive 顺序、置顶失败不阻断迁移）；`npm run check` 全绿。
+
+## v0.1.4（2026-10-14 · 已提交）
 
 **适配 DSH 0.2.x（桌面端 0.2.0-rc.2 实测）**。v0.1.3 在新版上"装得上、跑不通"：宿主路由
 每次迁移都返回 `session-not-found`，实测报错 `persistence.readFrom is not a function`。

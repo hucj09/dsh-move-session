@@ -2,10 +2,14 @@
  * Host-half unit tests: the full `moveSession` contract against fake services.
  * Run with `npm test` (node:test). Every behavior change to lib/index.js must
  * extend this suite (see AGENTS.md rule 3).
+ *
+ * The fakes mirror the current DSH service contracts: the source log is read
+ * through `sessionQuery.observeSession` (a disposable observation lease), and
+ * the target directory is pre-checked through `workspace.status()`.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { moveSession, sessionPresetId, lastModelOptions, sourceTitle, migratedTitle, stripMsSuffix, msNumber } from '../lib/index.js'
+import { moveSession, sessionPresetId, lastModelOptions, sourceTitle, observeSource, migratedTitle, stripMsSuffix, msNumber } from '../lib/index.js'
 
 /* ------------------------------------------------------------------ */
 /* fixtures                                                            */
@@ -19,14 +23,17 @@ const EVENTS = [
   { seq: 4, type: 'agent-preset/selected', time: 1004, data: { agentPreset: 'my-preset' } },
 ]
 
-const HEADER = { version: 0, id: 'src-1', createdAt: 1000, cwd: 'C:/ws1', agentPreset: 'cordis' }
+const HEADER = { version: 0, id: 'src-1', createdAt: 1000, cwd: 'C:/ws1', isSeeded: false, agentPreset: 'cordis' }
 
-function makeRegistry(workspaces, shared = {}) {
-  const archived = shared.archived || []
-  const attached = shared.attached || []
+/** Source workspace holding the moved session. */
+const WS1 = { id: 'w1', path: 'C:/ws1', title: 'WS1', sessionIds: ['src-1'] }
+/** Empty target workspace. */
+const WS2 = { id: 'w2', path: 'C:/ws2', title: 'WS2', sessionIds: [] }
+/** Target workspace already holding sessions. */
+const WS2_FILLED = { id: 'w2', path: 'C:/ws2', title: 'WS2', sessionIds: ['t-1', 't-2'] }
+
+function makeRegistry(workspaces, shared) {
   return {
-    archived,
-    attached,
     get(id) {
       const hit = workspaces.find((w) => w.id === id)
       if (!hit) return undefined
@@ -35,25 +42,26 @@ function makeRegistry(workspaces, shared = {}) {
         path: hit.path,
         title: hit.title,
         sessionIds: hit.sessionIds,
+        status: async () => {
+          if (hit.statusError !== undefined) throw hit.statusError
+          return hit.status || 'ok'
+        },
         attachSession: async (sid) => {
-          attached.push(sid)
+          shared.attached.push(sid)
         },
       }
     },
     list: () => workspaces,
     archiveSession: async (id) => {
-      archived.push(id)
+      shared.archived.push(id)
     },
   }
 }
 
-/** Build a fake ctx with recording agents/persistence/presets. */
+/** Build a fake ctx with recording agents/sessionQuery/presets. */
 function makeCtx(overrides = {}) {
-  const calls = { created: [], mounted: [], archived: [], attached: [], renamed: [], flushed: false }
-  const registry = makeRegistry(overrides.workspaces || [
-    { id: 'w1', path: 'C:/ws1', title: 'WS1', sessionIds: ['src-1'] },
-    { id: 'w2', path: 'C:/ws2', title: 'WS2', sessionIds: [] },
-  ], calls)
+  const calls = { created: [], mounted: [], archived: [], attached: [], renamed: [], flushed: false, disposed: 0 }
+  const registry = makeRegistry(overrides.workspaces || [WS1, WS2], calls)
   const ctx = {
     calls,
     get(name) {
@@ -75,12 +83,27 @@ function makeCtx(overrides = {}) {
       }
       if (name === 'sessionQuery') {
         return {
-          readTitleSnapshots: async (sessionIds) =>
-            (overrides.targetTitles || []).map((title, index) => ({
+          observeSession: async (id) => {
+            if (overrides.observeError) throw overrides.observeError
+            if (overrides.missingId === id) throw new Error(`session ${id} not found`)
+            return {
+              source: 'live',
+              header: overrides.header || HEADER,
+              events: overrides.events || EVENTS,
+              cursor: (overrides.events || EVENTS).length - 1,
+              [Symbol.dispose]() {
+                calls.disposed += 1
+              },
+            }
+          },
+          readTitleSnapshots: async (sessionIds) => {
+            if (overrides.titleQueryError) throw overrides.titleQueryError
+            return (overrides.targetTitles || []).map((title, index) => ({
               sessionId: sessionIds[index] || 't-' + index,
               status: 'fulfilled',
               value: { session: {}, title: { title } },
-            })),
+            }))
+          },
         }
       }
       if (name === 'sessions') {
@@ -91,43 +114,14 @@ function makeCtx(overrides = {}) {
           },
         }
       }
-      if (name === 'sessionPersistence') {
-        return {
-          readFrom: async (id) => {
-            if (overrides.readError) throw overrides.readError
-            if (overrides.missingId === id) return { meta: undefined, events: [] }
-            return {
-              meta: overrides.header || HEADER,
-              events: overrides.events || EVENTS,
-            }
-          },
-        }
-      }
       if (name === 'workspaceRegistry') {
-        return {
-          ...registry,
-          archiveSession: async (id) => {
-            calls.archived.push(id)
-          },
-        }
+        return registry
       }
       if (name === 'agentPresets') {
         return {
           resolve: async (id) => ({ id: id ?? 'default' }),
           mount: async (agentCtx, id) => {
             calls.mounted.push(id)
-          },
-        }
-      }
-      if (name === 'fs') {
-        return {
-          resolve: async (path) => {
-            if (overrides.targetDirResolveError) throw new Error('ENOENT: no such file or directory')
-            return { path }
-          },
-          stat: async () => {
-            if (overrides.targetDirMissing) return undefined
-            return { type: overrides.targetDirType || 'directory', version: 'v1' }
           },
         }
       }
@@ -168,6 +162,50 @@ test('lastModelOptions: inherits provider/model from the last request/header', (
 test('lastModelOptions: skips configs without provider/model', () => {
   assert.equal(lastModelOptions([{ type: 'request/header', data: { header: { config: {} } } }]), undefined)
   assert.equal(lastModelOptions([]), undefined)
+})
+
+/* ------------------------------------------------------------------ */
+/* source observation                                                  */
+/* ------------------------------------------------------------------ */
+
+test('observeSource: returns the header and events of one observation lease', async () => {
+  const ctx = makeCtx()
+  const source = await observeSource(ctx, 'src-1')
+  assert.equal(source.header, HEADER)
+  assert.equal(source.events, EVENTS)
+})
+
+test('observeSource: releases the observation lease', async () => {
+  const ctx = makeCtx()
+  await observeSource(ctx, 'src-1')
+  assert.equal(ctx.calls.disposed, 1)
+})
+
+test('observeSource: releases the lease even when the read throws', async () => {
+  const ctx = makeCtx()
+  const originalGet = ctx.get
+  ctx.get = (name) =>
+    name === 'sessionQuery'
+      ? {
+        observeSession: async () => ({
+          header: HEADER,
+          get events() { throw new Error('log on fire') },
+          [Symbol.dispose]() { ctx.calls.disposed += 1 },
+        }),
+      }
+      : originalGet(name)
+  await assert.rejects(() => observeSource(ctx, 'src-1'), /log on fire/)
+  assert.equal(ctx.calls.disposed, 1)
+})
+
+test('observeSource: reports a missing session as session-not-found', async () => {
+  const ctx = makeCtx({ missingId: 'ghost' })
+  await assert.rejects(() => observeSource(ctx, 'ghost'), (e) => e.code === 'session-not-found')
+})
+
+test('observeSource: reports an unavailable sessionQuery service', async () => {
+  const bare = { get: () => undefined }
+  await assert.rejects(() => observeSource(bare, 'src-1'), (e) => e.code === 'unavailable')
 })
 
 /* ------------------------------------------------------------------ */
@@ -219,35 +257,38 @@ test('migratedTitle: re-moving an already-marked copy re-bases instead of accumu
   assert.equal(migratedTitle('我的会话 [MS1]', new Set(['我的会话'])), '我的会话 [MS1]')
 })
 
-/** Target workspace with existing sessions (so the same-name check runs). */
-const WS_WITH_SESSIONS = [
-  { id: 'w1', path: 'C:/ws1', title: 'WS1', sessionIds: ['src-1'] },
-  { id: 'w2', path: 'C:/ws2', title: 'WS2', sessionIds: ['t-1', 't-2'] },
-]
-
 test('moves rename the copy with [MS1] when the target has a same-name session', async () => {
-  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: [WS1, WS2_FILLED] })
   await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 1)
   assert.deepEqual(ctx.calls.renamed[0], { session: { id: 'copy-1' }, title: '我的会话 [MS1]' })
 })
 
 test('moves ascend the marker on repeated moves into the same workspace', async () => {
-  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话', '我的会话 [MS1]'], workspaces: WS_WITH_SESSIONS })
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话', '我的会话 [MS1]'], workspaces: [WS1, WS2_FILLED] })
   await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.deepEqual(ctx.calls.renamed[0].title, '我的会话 [MS2]')
 })
 
 test('moves skip the rename when the target has no same-name session', async () => {
-  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['其他会话'], workspaces: WS_WITH_SESSIONS })
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['其他会话'], workspaces: [WS1, WS2_FILLED] })
   await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 0) // no title event written without a collision
 })
 
-test('moves skip the rename when sessionQuery is not mounted', async () => {
-  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
-  const originalGet = ctx.get
-  ctx.get = (name) => (name === 'sessionQuery' ? undefined : originalGet(name))
+test('moves skip the rename when the target holds no other session to compare with', async () => {
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'] })
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  assert.equal(ctx.calls.renamed.length, 0)
+})
+
+test('moves skip the rename when the title query fails', async () => {
+  const ctx = makeCtx({
+    events: TITLED_EVENTS,
+    agentSession: { id: 'copy-1' },
+    titleQueryError: new Error('index unavailable'),
+    workspaces: [WS1, WS2_FILLED],
+  })
   await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
   assert.equal(ctx.calls.renamed.length, 0) // cannot check same-name -> keep the inherited title
 })
@@ -259,7 +300,7 @@ test('moves skip the rename when the source has no title', async () => {
 })
 
 test('moves skip the rename when sessionTitle is not mounted', async () => {
-  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: [WS1, WS2_FILLED] })
   const originalGet = ctx.get
   ctx.get = (name) => (name === 'sessionTitle' ? undefined : originalGet(name))
   await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
@@ -267,7 +308,7 @@ test('moves skip the rename when sessionTitle is not mounted', async () => {
 })
 
 test('moves survive a rename failure (title is presentation metadata)', async () => {
-  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: WS_WITH_SESSIONS })
+  const ctx = makeCtx({ events: TITLED_EVENTS, agentSession: { id: 'copy-1' }, targetTitles: ['我的会话'], workspaces: [WS1, WS2_FILLED] })
   const originalGet = ctx.get
   ctx.get = (name) =>
     name === 'sessionTitle'
@@ -317,8 +358,8 @@ test('rejects an unknown session', async () => {
   await assert.rejects(() => moveSession(ctx, { sessionId: 'ghost', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-not-found')
 })
 
-test('rejects when persistence read fails', async () => {
-  const ctx = makeCtx({ readError: new Error('disk on fire') })
+test('rejects when the source observation fails', async () => {
+  const ctx = makeCtx({ observeError: new Error('disk on fire') })
   await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }), (e) => e.code === 'session-not-found')
 })
 
@@ -333,12 +374,12 @@ test('flushes a live source session before reading', async () => {
 /* ------------------------------------------------------------------ */
 
 test('rejects an unknown target workspace', async () => {
-  const ctx = makeCtx({ workspaces: [{ id: 'w1', path: 'C:/ws1', title: 'WS1', sessionIds: ['src-1'] }] })
+  const ctx = makeCtx({ workspaces: [WS1] })
   await assert.rejects(() => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w9', mode: 'keep' }), (e) => e.code === 'target-not-found')
 })
 
 test('rejects a stale target workspace whose directory is gone — before any write', async () => {
-  const ctx = makeCtx({ targetDirMissing: true })
+  const ctx = makeCtx({ workspaces: [WS1, { ...WS2, status: 'missing-dir' }] })
   await assert.rejects(
     () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
     (e) => e.code === 'target-missing-dir',
@@ -350,37 +391,12 @@ test('rejects a stale target workspace whose directory is gone — before any wr
 })
 
 test('rejects when the target directory cannot be resolved', async () => {
-  const ctx = makeCtx({ targetDirResolveError: true })
+  const ctx = makeCtx({ workspaces: [WS1, { ...WS2, statusError: new Error('ENOENT: no such file or directory') }] })
   await assert.rejects(
     () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
     (e) => e.code === 'target-missing-dir',
   )
   assert.equal(ctx.calls.created.length, 0)
-})
-
-test('rejects a target path that is not a directory', async () => {
-  const ctx = makeCtx({ targetDirType: 'file' })
-  await assert.rejects(
-    () => moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' }),
-    (e) => e.code === 'target-missing-dir',
-  )
-  assert.equal(ctx.calls.created.length, 0)
-})
-
-test('proceeds when the target directory exists (fs pre-check passes)', async () => {
-  const ctx = makeCtx()
-  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
-  assert.equal(ctx.calls.created.length, 1)
-  assert.deepEqual(ctx.calls.attached, [result.sessionId])
-})
-
-test('skips the directory pre-check when no fs service is mounted', async () => {
-  const ctx = makeCtx()
-  const originalGet = ctx.get
-  ctx.get = (name) => (name === 'fs' ? undefined : originalGet(name))
-  const result = await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
-  assert.equal(ctx.calls.created.length, 1)
-  assert.deepEqual(ctx.calls.attached, [result.sessionId])
 })
 
 test('rejects moving into the session\'s own workspace', async () => {
@@ -405,7 +421,7 @@ test('archive mode: creates the copy, attaches it, archives the source', async (
   assert.deepEqual(opts.meta, {
     cwd: 'C:/ws2',
     parentSession: 'src-1',
-    seedLength: EVENTS.length,
+    isSeeded: true,
     agentPreset: 'my-preset', // from the last agent-preset/selected event
   })
   assert.deepEqual(opts.agentOptions, { provider: 'deepseek', model: 'deepseek-v4' })
@@ -415,6 +431,19 @@ test('archive mode: creates the copy, attaches it, archives the source', async (
 
   assert.deepEqual(ctx.calls.attached, [result.sessionId])
   assert.deepEqual(ctx.calls.archived, ['src-1'])
+})
+
+test('regression: the copy meta carries no retired "seedLength" field', async () => {
+  // DSH >= 0.2 rejects an unknown session-header field by throwing
+  // ('session header has invalid field "seedLength"'), which failed every move.
+  const ctx = makeCtx()
+  await moveSession(ctx, { sessionId: 'src-1', targetWorkspaceId: 'w2', mode: 'keep' })
+  const opts = ctx.calls.created[0]
+  assert.equal(Object.hasOwn(opts.meta, 'seedLength'), false)
+  assert.equal(Object.hasOwn(opts.meta, 'isSeeded'), true)
+  // the whole source log is the child's inherited prefix
+  assert.equal(opts.inheritedEventCount, EVENTS.length)
+  assert.equal(opts.meta.isSeeded, true)
 })
 
 test('keep mode: creates the copy but never archives the source', async () => {
@@ -478,6 +507,7 @@ test('wraps attach failures as attach-failed', async () => {
       ...registry,
       get: (id) => (id === 'w2' ? {
         id: 'w2', path: 'C:/ws2', title: 'WS2', sessionIds: [],
+        status: async () => 'ok',
         attachSession: async () => { throw new Error('cwd mismatch') },
       } : registry.get(id)),
     }

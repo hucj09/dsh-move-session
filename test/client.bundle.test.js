@@ -1,10 +1,12 @@
 /**
  * Client-bundle structural tests: guard the invariants of lib/client.js that
- * broke the dialog before (see AGENTS.md rule 3):
+ * broke the dialog before (see AGENTS.md rule 2/3):
  *   - the bundle registers under the package id via __ModuleLoader__.load
  *   - zh/en dictionaries carry the same key set and every required key
  *   - the store force uses functional updates (no bare force() bailout)
- *   - the row-menu injection anchors (ARIA roles, fiber recovery) are present
+ *   - every contribution registers into a documented slot, with `locale` so
+ *     the framework supplies the `t` seat
+ *   - the session-row menu entry is a slot occupant (no DOM/fiber injection)
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -56,7 +58,7 @@ test('bundle registers under the package id via __ModuleLoader__.load', () => {
   assert.match(CLIENT, /window\.__ModuleLoader__\.load\(\{/)
   assert.match(CLIENT, /id: '@hucj\/dsh-move-session'/)
   assert.match(CLIENT, /exports\.apply = apply/)
-  assert.match(CLIENT, /exports\.inject = \['slots', 'sessions', 'locale'\]/)
+  assert.match(CLIENT, /exports\.inject = \['slots', 'sessions', 'locale', 'uiWorkspace'\]/)
 })
 
 test('zh/en dictionaries carry identical key sets', () => {
@@ -105,38 +107,73 @@ test('default mode is keep', () => {
   assert.ok(keepFirst !== -1 && archiveSecond !== -1 && keepFirst < archiveSecond, 'keep option must render first')
 })
 
-test('row-menu injection anchors are present', () => {
-  assert.match(CLIENT, /role="menu"/)
-  assert.match(CLIENT, /setAttribute\('role', 'menuitem'\)/)
-  assert.match(CLIENT, /__reactFiber\$/)
-  assert.match(CLIENT, /MutationObserver/)
-  assert.match(CLIENT, /isSessionRowMenu/)
-  assert.match(CLIENT, /data-dsh-ms-menu-item/)
+/* ------------------------------------------------------------------ */
+/* slot contributions                                                  */
+/* ------------------------------------------------------------------ */
+
+test('every contribution registers into a documented slot with a locale seat', () => {
+  for (const slot of [
+    'conversation.session.header.actions',
+    'sidebar.workspaces.session.menu.item',
+    'shell.overlay',
+  ]) {
+    assert.ok(CLIENT.includes(`slots.inject('${slot}'`), `must inject slot ${slot}`)
+  }
+  assert.match(CLIENT, /name: 'conversation\.session\.header\.actions', id: 'move-session', order: 30, locale: NS/)
+  assert.match(CLIENT, /id: 'move-session',\s*\n\s*\/\/ after the shipped pin\(100\) \/ rename\(200\) \/ fork\(300\) \/ archive\(400\)\s*\n\s*order: 500,\s*\n\s*locale: NS,/)
+  assert.match(CLIENT, /id: 'move-session-dialog',\s*\n\s*order: 50,\s*\n\s*locale: NS,/)
+  // the dictionaries still register through the locale service
+  assert.match(CLIENT, /locale\.register\(NS, DICT\)/)
 })
 
-test('row-menu injection only targets session rows (not workspace rows)', () => {
-  // the click capture must track whether the clicked row is a session row
-  assert.match(CLIENT, /lastRowIsSession = false/)
-  assert.match(CLIENT, /lastRowIsSession = lastRowSessionId !== null/)
-  // the observer must gate injection on it
-  assert.match(CLIENT, /if \(lastRowIsSession && isSessionRowMenu\(menu\)\)/)
-  // workspace menus are excluded explicitly (they contain a rename entry too)
-  assert.match(CLIENT, /text\.indexOf\('删除工作区'\) !== -1 \|\| text\.indexOf\('Delete workspace'\) !== -1\) return false/)
-  // the ellipsis matcher covers both zh (…的操作) and en (…actions for …) rows
-  assert.match(CLIENT, /aria-label\$="\\u7684\\u64cd\\u4f5c"\]/)
-  assert.match(CLIENT, /aria-label\*="actions for "/)
+test('components translate through the framework seat, not a private subscription', () => {
+  assert.match(CLIENT, /var t = props\.t/)
+  assert.ok(!CLIENT.includes('localeCtx'), 'the private locale handle must be gone')
+  assert.ok(!CLIENT.includes('function useT('), 'the private translator hook must be gone')
 })
 
-test('row-menu injection disables the item for running sessions', () => {
-  // the fiber recovery must read the running flag
-  assert.match(CLIENT, /running: props\.node\.running === true/)
-  assert.match(CLIENT, /var lastRowRunning = false/)
-  assert.match(CLIENT, /lastRowRunning = info === null \? false : info\.running/)
-  // the injected item must be disabled with a localized hint
-  assert.match(CLIENT, /var disabled = lastRowRunning === true/)
-  assert.match(CLIENT, /button\.disabled = disabled/)
-  assert.match(CLIENT, /current\('hint\.running'\)/)
+test('the session-row menu entry is a slot occupant, not DOM injection', () => {
+  assert.match(CLIENT, /function MoveSessionMenuItem\(props\)/)
+  // owner share + the menu open-state hook the slot binds
+  assert.match(CLIENT, /var sessionId = props\.sessionId/)
+  assert.match(CLIENT, /var menuOpen = props\.useMenuOpenState\(\)/)
+  assert.match(CLIENT, /var setMenuOpen = menuOpen\[1\]/)
+  // it renders exactly one role="menuitem" button and dismisses the menu first
+  assert.match(CLIENT, /role: 'menuitem'/)
+  const click = CLIENT.slice(CLIENT.indexOf('onClick: function () {\n            setMenuOpen(false)'))
+  assert.match(click, /^onClick: function \(\) \{\n            setMenuOpen\(false\)\n            setState\(\{ open: true, sessionId: sessionId/)
+  // the brittle DOM/fiber machinery is gone for good
+  assert.ok(!CLIENT.includes('__reactFiber$'), 'React-fiber recovery must be gone')
+  assert.ok(!CLIENT.includes('new MutationObserver'), 'DOM menu observation must be gone')
+  assert.ok(!CLIENT.includes('data-dsh-ms-menu-item'), 'DOM menu injection must be gone')
+  assert.ok(!CLIENT.includes('isSessionRowMenu'), 'localized menu sniffing must be gone')
+})
+
+test('the row-menu entry disables itself for running sessions', () => {
+  // the row identity comes from the owner; the running flag from the session list
+  assert.match(CLIENT, /var running = props\.useSessions\(function \(snapshot\) \{/)
+  assert.match(CLIENT, /var row = snapshot\.byId\[sessionId\]/)
+  assert.match(CLIENT, /return row === undefined \? false : row\.running === true/)
+  assert.match(CLIENT, /disabled: running,/)
+  assert.match(CLIENT, /title: running \? t\('hint\.running'\) : t\('menu\.move'\)/)
   assert.match(CLIENT, /\.dsh-ms-menu-item:disabled\{opacity:\.45;cursor:not-allowed\}/)
+})
+
+test('opening the moved session goes through the workspace navigation service', () => {
+  assert.match(CLIENT, /var uiWorkspace = ctx\.get\('uiWorkspace'\)/)
+  assert.match(CLIENT, /uiWorkspace\.openSession\(sessionId\)/)
+  // the copy reaches the client through host/session-added, so the list can
+  // lag the move: wait, bounded, for the row before navigating
+  assert.match(CLIENT, /sessions\.list\.getSnapshot\(\)\.byId\[sessionId\] !== undefined/)
+  assert.match(CLIENT, /attempts >= 20/)
+  // the overlay receives the callback through its declared inject face
+  assert.match(CLIENT, /inject: function \(\) \{ return \{ openSession: openSession \} \}/)
+})
+
+test('the dialog reads the session title from the session list projection', () => {
+  assert.match(CLIENT, /var sessions = props\.useSessions\(function \(snapshot\) \{ return snapshot \}\)/)
+  assert.match(CLIENT, /summary\.displayTitle/)
+  assert.ok(!CLIENT.includes('summary.title'), 'SessionSummary exposes displayTitle, not title')
 })
 
 test('header button uses the custom icon paths', () => {

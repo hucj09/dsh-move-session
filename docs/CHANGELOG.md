@@ -7,6 +7,45 @@
 
 ---
 
+## v0.1.4（2026-10-13 · 待发布）
+
+**适配 DSH 0.2.x（桌面端 0.2.0-rc.2 实测）**。v0.1.3 在新版上"装得上、跑不通"：宿主路由
+每次迁移都返回 `session-not-found`，实测报错 `persistence.readFrom is not a function`。
+
+- **宿主端 · 源日志读取重写（根因）**：DSH ≥ 0.2 的 `sessionPersistence` 只提供
+  `create/open/flush/stat/list`（日志按 `SessionHandle` 读），旧的 `readFrom(id, 0)` 已不存在。
+  改为 `sessionQuery.observeSession(id)` —— 官方分叉同一读法（live 优先、冷读安全、补齐中断
+  turn 收尾），并在 `finally` 释放观察租约（`observation[Symbol.dispose]()`）
+- **宿主端 · 副本血缘重写（第二根因）**：DSH ≥ 0.2 的 session header 校验遇 `meta.seedLength`
+  **直接抛错**（`session header has invalid field "seedLength"`），迁移必然 `copy-failed`。
+  改为官方分叉语义：`meta.isSeeded: true` + 顶层 `inheritedEventCount`(= 全量源事件数)，
+  由 `Session` 构造函数在切点补 `session/end-seed { inherited: true }` 标记
+- **宿主端 · 目标目录预检**：由 `fs.resolve`+`fs.stat` 改为 `workspace.status()`
+  （工作区实体自带契约，返回 `'ok' | 'missing-dir'`，不经 sandbox 策略），错误码仍为
+  `target-missing-dir`、仍在任何写入前拒绝；`fs` 服务不再被使用
+- **宿主端 · 必需服务**：由 agents/sessionPersistence/workspaceRegistry 改为
+  agents/sessionQuery/workspaceRegistry（`sessionPersistence` 不再直接依赖）
+- **客户端 · 会话行菜单改为官方插槽（去 Hack）**：DSH 0.2 新增
+  `sidebar.workspaces.session.menu.item` 插槽，旧版"点击捕获 + `__reactFiber$` 恢复会话 id +
+  MutationObserver 观察 portal 菜单 + 中英文案嗅探"整套 DOM 注入删除，改为
+  `slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'move-session', order: 500, locale: NS })`
+  （紧随官方 归档 400），并用插槽注入的 `useMenuOpenState` 收起菜单
+- **客户端 · 文案改走框架座位**：三个注册均声明 `locale: NS`，组件用框架注入的 `props.t`
+  （跟随语言切换自动重渲染）；自建 `useT()` + `locale.subscribe` 机制删除
+- **客户端 · 打开迁移后的会话**：客户端 `sessions.open` 已删除，改 `uiWorkspace.openSession(id)`，
+  并在调用前有界等待副本出现在会话列表（副本经 `host/session-added` 到达，存在时延）
+- **客户端 · 依赖声明**：`exports.inject` 由 `['slots','sessions','locale']` 改为
+  `['slots','sessions','locale','uiWorkspace']`
+- **测试**：`node --test` 62 用例（新增源日志租约释放、切面读取失败包裹、`isSeeded`/
+  `inheritedEventCount`、「无 `seedLength`」回归、三插槽注册与 `locale: NS`、
+  「禁止 DOM/fiber 注入残留」结构断言）；`npm run check` 全绿
+- **实测验证（隔离 `DSH_HOME`，真实桌面 CLI 0.2.0-rc.2 运行时）**：keep 迁移 → 副本 26 条正文
+  事件**逐字节一致** + 1 枚继承标记、header 新 id/目标 cwd/`isSeeded`/`parentSession`/预设/
+  `origin`/`delegationDepth` 全部正确、`attachSession` 落到目标工作区；archive 迁移 → 源进入
+  `archivedSessionIds`、同名副本标题追加 `[MS1]`；浏览器端（Playwright）头部按钮 迁移会话 可点、
+  会话行「…」菜单出现 迁移会话 项且点击后菜单收起、对话框目标工作区/保留优先默认/成功面板
+  「打开迁移后的会话」全部正常，控制台零错误
+
 ## v0.1.3（2026-08-16 · 待发布）
 
 重新发布（无功能改动）：

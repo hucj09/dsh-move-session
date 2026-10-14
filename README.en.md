@@ -7,9 +7,10 @@ session operations: copy the current session **as-is** into another workspace (f
 log, title, agent preset and model selection preserved), with a choice to **keep the original** or
 **archive the original**. Only **idle** sessions can be moved.
 
-> Current version **v0.1.3**. Same hot-pluggable convention as `dsh-ssh` / `dsh-task-board`:
-> mounted via `cordis.patch.yml` + a profile `node_modules` install, **no dsh source changes**.
-> Zero-dependency plain JavaScript, **source-as-artifact** (`lib/` is the runtime code), no build step.
+> Current version **v0.1.4**, targeting **DSH 0.2.x** (desktop 0.2.0-rc.2 and later). Same
+> hot-pluggable convention as `dsh-ssh` / `dsh-task-board`: mounted via `cordis.patch.yml` + a
+> profile `node_modules` install, **no dsh source changes**. Zero-dependency plain JavaScript,
+> **source-as-artifact** (`lib/` is the runtime code), no build step.
 
 ---
 
@@ -17,7 +18,7 @@ log, title, agent preset and model selection preserved), with a choice to **keep
 
 | Requirement | Implementation |
 | --- | --- |
-| 1. "Move Session" among session operations | ① **Move Session** button in the session header action row (icon + label, alongside agent preset / subagent catalog / job list); ② a **Move Session** entry injected into the sidebar session-row "…" menu (after rename / fork / archive; installed package only) |
+| 1. "Move Session" among session operations | ① **Move Session** button in the session header action row (icon + label, alongside agent preset / subagent catalog / job list); ② a **Move Session** entry in the sidebar session-row "…" menu (the official `sidebar.workspaces.session.menu.item` slot, after rename / fork / archive) |
 | 2. Move as-is to another workspace, full context | The complete event log is copied verbatim (messages, tool calls, title, agent-preset/selected, request/header and every other event), recorded as a new session in the target workspace |
 | 3. Keep or archive the original | Radio choice in the dialog: `Keep the original session` (default) or `Archive the original session` |
 | 4. Proper UI interaction | Icon+label button → modal dialog (target workspace picker + mode picker + error/success states), auto-navigate or offer to open the moved session; all text follows the GUI language (zh/en) |
@@ -31,9 +32,11 @@ Other details:
 - **Model & preset inheritance**: `agentOptions` come from the last `request/header` in the source
   log (better than the shipped fork's "current default model"); the agent world is composed from the
   source's preset (last `agent-preset/selected` event, else `header.agentPreset`).
-- **Lineage preserved**: the copy header records `parentSession` = source id and
-  `seedLength` = full event count, matching the shipped fork lineage semantics; timestamps and
-  event order are preserved byte-for-byte.
+- **Lineage preserved**: the copy header records `isSeeded: true` and `parentSession` = source id,
+  and declares the **whole source log** as its inherited prefix (`inheritedEventCount` = source
+  event count; the constructor appends one `session/end-seed { inherited: true }` marker at the
+  cut) — matching the shipped fork lineage semantics; timestamps and event order are preserved
+  byte-for-byte.
 - **Session-safe**: the copy gets a fresh id (`session-mv-<time36>-<seq36>`); nothing is
   overwritten or deleted; keep-mode leaves the source untouched.
 - **Same-name distinction**: only when the target workspace already holds a session with the
@@ -50,6 +53,15 @@ Other details:
 ---
 
 ## Install
+
+> **Desktop (DeepSeek Harness Desktop)**: `desktop` is the application's reserved profile, and the
+> source CLI as well as the shipped CLI refuse `dsh plugin --profile desktop ...`
+> (`profile "desktop" is managed exclusively by the Electron application`). On the desktop use one
+> of the application's own channels: ① the in-app **Settings → Plugins** page, or ② the CLI
+> forwarder bundled with the app (Windows:
+> `%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd`, the same `dsh` the
+> "install the command-line tool" action puts on `PATH`): `dsh.cmd plugin --profile desktop add <spec>`.
+> Afterwards **fully quit and restart the application** — the `desktop` profile does not hot-reload.
 
 ### Option 1: after npm release (recommended)
 
@@ -79,8 +91,9 @@ After installing, **restart dsh web** (new bundles only load on next start) and 
 install succeeded.
 
 > Note: `dsh.client.inject` is empty; the plugin itself declares
-> `inject: ['slots', 'sessions', 'locale']` as hard dependencies, so the host needs the standard
-> web runtime (`@deepseek-ai/dsh-client-runtime` etc., present in default deployments).
+> `inject: ['slots', 'sessions', 'locale', 'uiWorkspace']` as hard dependencies, so the host needs
+> the standard web runtime (`dsh-client-ui-workspace`, `dsh-client-locale`,
+> `dsh-client-ui-conversation`, …, present in the default web and desktop profiles).
 
 ## Uninstall
 
@@ -117,18 +130,22 @@ Then **restart dsh web**.
 ## How it works (brief)
 
 - **Host half** (`lib/index.js`): a loopback-only HTTP route `POST /api/dsh-move-session/move`,
-  mirroring the shipped `session.fork` handler step by step: idle check → flush + read the full
-  log → target/same-workspace validation → **target directory pre-check** (via the `fs` service;
-  a stale registry entry is rejected before any write) → mint a new identity (fresh id + target
-  cwd + lineage) → `agents.create` publishes the copy (seed = all events, setup composes the
-  source preset via `agentPresets.resolve/mount`) → **same-name title suffix** (`sessionQuery`
-  reads the target titles, `sessionTitle.rename` appends `[MS<n>]` on collision) →
-  `attachSession` accounting → `archiveSession` on request.
-- **Browser half** (`lib/client.js`): a standard web plugin bundle registering into the
-  `conversation.session.header.actions` button slot and the `shell.overlay` dialog slot (both
-  official additive slots, `replaceRisk: none`); the sidebar row-menu entry is injected via ARIA
-  role anchors (the official menu is a portaled `[role="menu"]`; the session id is recovered from
-  the row's React fiber) — no dependency on official CSS class names.
+  mirroring the shipped `session.fork` handler step by step: idle check → flush live →
+  **`sessionQuery.observeSession` takes one immutable log cut** (live-preferred and cold-safe — the
+  same read the shipped fork uses) → target/same-workspace validation → **target directory
+  pre-check** (`workspace.status()`; a stale registry entry is rejected before any write) → mint a
+  new identity (fresh id + target cwd + lineage) → `agents.create` publishes the copy (`seed` = all
+  events, `inheritedEventCount` = event count, `meta.isSeeded: true`; setup composes the source
+  preset via `agentPresets.resolve/mount`) → **same-name title suffix** (`sessionQuery` reads the
+  target titles, `sessionTitle.rename` appends `[MS<n>]` on collision) → `attachSession`
+  accounting → `archiveSession` on request.
+- **Browser half** (`lib/client.js`): a standard web plugin bundle registering into three official
+  additive slots (`replaceRisk: none`): the `conversation.session.header.actions` button,
+  the `sidebar.workspaces.session.menu.item` session-row menu entry, and the `shell.overlay` move
+  dialog. The row entry is a **first-class slot occupant** (`order: 500`, right after the shipped
+  archive at 400) that dismisses the menu through `useMenuOpenState` — **no DOM injection, no React
+  fiber recovery, no CSS class-name dependency**. All three registrations declare `locale: NS`, so
+  the framework supplies the `t` seat and the copy follows the GUI language.
 - **Log integrity**: migration copies the full log event by event; run
   `npm run test:integrity` to verify any source/copy pair (real-data check: 1042 events + 212
   chunk records preserved 100%).
@@ -158,9 +175,9 @@ commits, code invariants); release history in **docs/CHANGELOG.md**.
 | code | meaning |
 | --- | --- |
 | `invalid-session` / `invalid-target` / `invalid-mode` | missing or invalid request parameters |
-| `unavailable` | required host services not mounted (agents / sessionPersistence / workspaceRegistry) |
+| `unavailable` | required host services not mounted (agents / sessionQuery / workspaceRegistry) |
 | `session-busy` | session is running; only idle sessions can be moved |
-| `session-not-found` | session absent from session persistence |
+| `session-not-found` | session absent from session persistence, or its log cut could not be read |
 | `target-not-found` | target workspace does not exist |
 | `same-workspace` | session already belongs to the target workspace |
 | `target-missing-dir` | target workspace directory missing or stale (e.g. a temp directory cleaned up); **rejected before any write — no orphan copy** |
@@ -176,8 +193,8 @@ commits, code invariants); release history in **docs/CHANGELOG.md**.
 - Only **idle** sessions can be moved; the client disables the button while running and the host
   rejects as well.
 - The source log must be **balanced** (no open turn/step or dangling tool call) — idle sessions
-  satisfy this naturally; otherwise the copy creation is rejected by dsh's seed validation (same
-  strictness as the shipped fork).
+  satisfy this naturally; an interrupted turn is closed by the observation read (the same read the
+  shipped fork uses) and copy creation stays subject to dsh's seed validation.
 - The session id changes (`session-mv-*`): a necessary consequence of copy semantics — dsh keys
   persistence by id, and a duplicate id across workspaces would corrupt lists/accounting. Lineage
   is kept via `parentSession`.
